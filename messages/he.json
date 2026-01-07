@@ -1,0 +1,58 @@
+{
+  "nav": {
+    "meetings": "פגישות",
+    "search": "חיפוש",
+    "settings": "הגדרות",
+    "newMeeting": "פגישה חדשה"
+  },
+  "meeting": {
+    "transcript": "תמלול",
+    "summary": "סיכום",
+    "actions": "משימות",
+    "questions": "שאלות",
+    "noTranscript": "אין תמלול זמין",
+    "noSummary": "אין סיכום זמין",
+    "processing": "מעבד...",
+    "completed": "הושלם",
+    "failed": "נכשל",
+    "pending": "ממתין"
+  },
+  "recording": {
+    "start": "התחל הקלטה",
+    "stop": "עצור הקלטה",
+    "pause": "השהה",
+    "resume": "המשך",
+    "microphone": "מיקרופון",
+    "systemAudio": "שמע מערכת",
+    "selectMode": "בחר מצב הקלטה",
+    "microphoneDesc": "הקלט ממיקרופון (פגישות פיזיות)",
+    "systemAudioDesc": "לכד שמע מערכת (פגישות אונליין)",
+    "shareAudioWarning": "וודא שסימנת 'שתף שמע' בעת שיתוף המסך"
+  },
+  "upload": {
+    "title": "העלאת קובץ שמע",
+    "dropzone": "גרור קובץ שמע לכאן, או לחץ לבחירה",
+    "uploading": "מעלה...",
+    "processing": "מעבד..."
+  },
+  "common": {
+    "save": "שמור",
+    "cancel": "ביטול",
+    "delete": "מחק",
+    "edit": "ערוך",
+    "loading": "טוען...",
+    "error": "אירעה שגיאה",
+    "retry": "נסה שוב",
+    "noResults": "לא נמצאו תוצאות"
+  },
+  "auth": {
+    "signIn": "התחברות",
+    "signOut": "התנתקות",
+    "signUp": "הרשמה",
+    "email": "אימייל",
+    "password": "סיסמה",
+    "forgotPassword": "שכחת סיסמה?",
+    "orContinueWith": "או המשך עם",
+    "google": "Google"
+  }
+}

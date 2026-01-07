@@ -1,0 +1,58 @@
+{
+  "nav": {
+    "meetings": "Meetings",
+    "search": "Search",
+    "settings": "Settings",
+    "newMeeting": "New Meeting"
+  },
+  "meeting": {
+    "transcript": "Transcript",
+    "summary": "Summary",
+    "actions": "Action Items",
+    "questions": "Q&A",
+    "noTranscript": "No transcript available",
+    "noSummary": "No summary available",
+    "processing": "Processing...",
+    "completed": "Completed",
+    "failed": "Failed",
+    "pending": "Pending"
+  },
+  "recording": {
+    "start": "Start Recording",
+    "stop": "Stop Recording",
+    "pause": "Pause",
+    "resume": "Resume",
+    "microphone": "Microphone",
+    "systemAudio": "System Audio",
+    "selectMode": "Select recording mode",
+    "microphoneDesc": "Record from your microphone (in-room meetings)",
+    "systemAudioDesc": "Capture system audio (online meetings)",
+    "shareAudioWarning": "Make sure to check 'Share audio' when sharing your screen"
+  },
+  "upload": {
+    "title": "Upload Audio",
+    "dropzone": "Drag and drop audio file here, or click to select",
+    "uploading": "Uploading...",
+    "processing": "Processing..."
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "retry": "Retry",
+    "noResults": "No results found"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "signUp": "Sign Up",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot Password?",
+    "orContinueWith": "Or continue with",
+    "google": "Google"
+  }
+}

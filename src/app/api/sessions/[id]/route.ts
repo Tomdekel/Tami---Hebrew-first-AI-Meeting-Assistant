@@ -1,0 +1,161 @@
+import { createClient } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
+import type { Session, SessionWithRelations } from "@/lib/types/database";
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+// GET /api/sessions/[id] - Get a single session with relations
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Get session with transcript, summary, and tags
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (sessionError) {
+    if (sessionError.code === "PGRST116") {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: sessionError.message }, { status: 500 });
+  }
+
+  // Get transcript with segments
+  const { data: transcript } = await supabase
+    .from("transcripts")
+    .select(`
+      *,
+      segments:transcript_segments(*)
+    `)
+    .eq("session_id", id)
+    .single();
+
+  // Get summary with action items
+  const { data: summary } = await supabase
+    .from("summaries")
+    .select(`
+      *,
+      action_items(*)
+    `)
+    .eq("session_id", id)
+    .single();
+
+  // Get tags through session_tags junction
+  const { data: sessionTags } = await supabase
+    .from("session_tags")
+    .select(`
+      tag:tags(*)
+    `)
+    .eq("session_id", id);
+
+  const tags = sessionTags?.map((st) => st.tag).filter(Boolean) || [];
+
+  const result: SessionWithRelations = {
+    ...session,
+    transcript: transcript
+      ? {
+          ...transcript,
+          segments: transcript.segments?.sort(
+            (a: { segment_order: number }, b: { segment_order: number }) =>
+              a.segment_order - b.segment_order
+          ) || [],
+        }
+      : undefined,
+    summary: summary
+      ? {
+          ...summary,
+          action_items: summary.action_items || [],
+        }
+      : undefined,
+    tags,
+  };
+
+  return NextResponse.json({ session: result });
+}
+
+// PATCH /api/sessions/[id] - Update a session
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { title, context, status, audio_url, detected_language, duration_seconds } = body;
+
+  // Build update object with only provided fields
+  const updates: Partial<Session> = {};
+  if (title !== undefined) updates.title = title;
+  if (context !== undefined) updates.context = context;
+  if (status !== undefined) updates.status = status;
+  if (audio_url !== undefined) updates.audio_url = audio_url;
+  if (detected_language !== undefined) updates.detected_language = detected_language;
+  if (duration_seconds !== undefined) updates.duration_seconds = duration_seconds;
+
+  const { data, error } = await supabase
+    .from("sessions")
+    .update(updates)
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ session: data as Session });
+}
+
+// DELETE /api/sessions/[id] - Delete a session
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Delete session (cascades to related records)
+  const { error } = await supabase
+    .from("sessions")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}
