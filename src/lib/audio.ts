@@ -261,20 +261,29 @@ const SILENCE_THRESHOLD = 0.01; // Below this is considered silence
 
 /**
  * Validate an audio blob for speech content
- * Uses Web Audio API to analyze the audio
+ * Uses Web Audio API to analyze the audio (for small files only)
  */
 export async function validateAudioForSpeech(
   audioBlob: Blob
 ): Promise<AudioValidationResult> {
   try {
-    // WebM/Opus files from MediaRecorder often cannot be decoded by Web Audio API
-    // Skip validation for these formats and trust the recording
+    // Skip detailed Web Audio API validation for:
+    // 1. WebM/Opus files (MediaRecorder format, often can't decode)
+    // 2. Large files (>10MB) - decoding entire file can crash/timeout browser
+    // 3. Common audio formats that don't need speech validation (m4a, mp4, aac)
     const isWebM = audioBlob.type.includes("webm") || audioBlob.type.includes("opus");
+    const isLargeFile = audioBlob.size > 10 * 1024 * 1024; // 10MB threshold
+    const isCommonAudioFormat =
+      audioBlob.type.includes("mp4") ||
+      audioBlob.type.includes("m4a") ||
+      audioBlob.type.includes("aac") ||
+      audioBlob.type.includes("mpeg"); // mp3
 
-    if (isWebM) {
-      // For WebM/Opus from MediaRecorder, we can't easily validate
+    const shouldSkipWebAudioValidation = isWebM || isLargeFile || isCommonAudioFormat;
+
+    if (shouldSkipWebAudioValidation) {
+      // For these files, we can't easily validate with Web Audio API
       // Just check basic size/duration constraints
-      // WebM files have headers even when very short, so check for minimum content
       const minSizeBytes = 1000; // 1KB minimum - just needs some audio data
 
       if (audioBlob.size < minSizeBytes) {
@@ -291,8 +300,13 @@ export async function validateAudioForSpeech(
         };
       }
 
-      // Estimate duration from file size (very rough: ~16KB/sec for 128kbps)
-      const estimatedDuration = audioBlob.size / 16000;
+      // Estimate duration from file size
+      // m4a/aac: ~16KB/sec for 128kbps
+      // mp3: ~16KB/sec for 128kbps
+      // wav: ~176KB/sec for 16-bit 44.1kHz stereo
+      const isWav = audioBlob.type.includes("wav");
+      const bytesPerSecond = isWav ? 176000 : 16000;
+      const estimatedDuration = audioBlob.size / bytesPerSecond;
 
       if (estimatedDuration > MAX_DURATION_SECONDS) {
         return {
@@ -308,7 +322,7 @@ export async function validateAudioForSpeech(
         };
       }
 
-      // For WebM, assume it's valid and let the transcription service handle it
+      // Assume valid and let the transcription service handle it
       return {
         isValid: true,
         details: {
@@ -316,12 +330,12 @@ export async function validateAudioForSpeech(
           avgAmplitude: 0.5, // Unknown, assume valid
           peakAmplitude: 0.5, // Unknown, assume valid
           silenceRatio: 0, // Unknown, assume valid
-          hasLikelySpeech: true, // Assume true for WebM
+          hasLikelySpeech: true, // Assume true
         },
       };
     }
 
-    // For non-WebM formats (MP3, WAV, M4A), use Web Audio API validation
+    // For small non-WebM formats (small MP3, WAV), use Web Audio API validation
     // Convert blob to array buffer
     const arrayBuffer = await audioBlob.arrayBuffer();
 
