@@ -111,7 +111,10 @@
     "invalidType": "Invalid file type",
     "selectAudioFile": "Please select an audio or video file",
     "success": "File uploaded! Starting transcription...",
-    "failed": "Upload failed"
+    "failed": "Upload failed",
+    "fileReady": "File Ready",
+    "startTranscription": "Start Transcription",
+    "readyToProcess": "Ready to process. You can still edit the context above."
   },
   "common": {
     "save": "Save",

@@ -8,8 +8,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Recorder } from "@/components/recording";
 import { toast } from "sonner";
 import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio";
@@ -156,12 +155,7 @@ export default function NewMeetingPage() {
     }
   };
 
-  // Auto-upload when file is selected
-  useEffect(() => {
-    if (selectedFile && !isUploading) {
-      handleUpload();
-    }
-  }, [selectedFile]);
+  // Removed auto-upload - user must click "Start Transcription" button
 
   const handleUpload = async () => {
     if (!selectedFile) return;
@@ -273,11 +267,13 @@ export default function NewMeetingPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Input
+              <Textarea
                 placeholder={t("upload.contextPlaceholder")}
                 value={meetingContext}
                 onChange={(e) => setMeetingContext(e.target.value)}
                 disabled={isProcessing}
+                className="min-h-[100px] max-h-[300px] resize-y"
+                dir="auto"
               />
             </CardContent>
           </Card>
@@ -300,21 +296,29 @@ export default function NewMeetingPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Input
+                <Textarea
                   placeholder={t("upload.contextPlaceholder")}
                   value={meetingContext}
                   onChange={(e) => setMeetingContext(e.target.value)}
                   disabled={isUploading}
+                  className="min-h-[100px] max-h-[300px] resize-y"
+                  dir="auto"
                 />
               </CardContent>
             </Card>
 
-            {/* Upload Area */}
+            {/* Upload Area / File Ready */}
             <Card>
               <CardHeader>
-                <CardTitle>{t("upload.selectFile")}</CardTitle>
+                <CardTitle>
+                  {selectedFile && !isUploading
+                    ? t("upload.fileReady")
+                    : t("upload.selectFile")}
+                </CardTitle>
                 <CardDescription>
-                  {t("upload.supportedFormats")}
+                  {selectedFile && !isUploading
+                    ? t("upload.readyToProcess")
+                    : t("upload.supportedFormats")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -328,6 +332,37 @@ export default function NewMeetingPage() {
                           {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
                         </p>
                       )}
+                    </div>
+                  </div>
+                ) : selectedFile ? (
+                  <div className="space-y-4">
+                    {/* File info */}
+                    <div className="flex items-center gap-3 p-4 bg-muted rounded-lg">
+                      <FileAudio className="h-10 w-10 text-primary flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{selectedFile.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={clearSelectedFile}
+                        className="flex-shrink-0"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-3 justify-end">
+                      <Button variant="outline" onClick={clearSelectedFile}>
+                        {t("common.cancel")}
+                      </Button>
+                      <Button onClick={handleUpload}>
+                        {t("upload.startTranscription")}
+                      </Button>
                     </div>
                   </div>
                 ) : (

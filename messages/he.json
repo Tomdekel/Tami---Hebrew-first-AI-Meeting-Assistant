@@ -111,7 +111,10 @@
     "invalidType": "סוג קובץ לא תקין",
     "selectAudioFile": "אנא בחר קובץ אודיו או וידאו",
     "success": "הקובץ הועלה! מתחיל תמלול...",
-    "failed": "העלאה נכשלה"
+    "failed": "העלאה נכשלה",
+    "fileReady": "הקובץ מוכן",
+    "startTranscription": "התחל תמלול",
+    "readyToProcess": "מוכן לעיבוד. עדיין ניתן לערוך את ההקשר למעלה."
   },
   "common": {
     "save": "שמור",
