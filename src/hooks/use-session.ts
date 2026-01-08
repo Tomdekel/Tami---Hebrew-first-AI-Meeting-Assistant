@@ -56,15 +56,32 @@ export function useSession(
     fetchSession();
   }, [fetchSession]);
 
-  // Poll while processing
+  // Poll while processing - check transcription status endpoint
   useEffect(() => {
     if (!pollWhileProcessing || !session || session.status !== "processing") {
       return;
     }
 
-    const interval = setInterval(fetchSession, pollInterval);
+    const checkTranscriptionStatus = async () => {
+      try {
+        // Call the transcription-status endpoint which will update the session
+        // if the job is complete, then refetch the session data
+        const response = await fetch(`/api/sessions/${sessionId}/transcription-status`);
+        if (response.ok) {
+          const data = await response.json();
+          // If status changed, refetch the full session
+          if (data.status !== "processing") {
+            await fetchSession();
+          }
+        }
+      } catch (err) {
+        console.error("Error checking transcription status:", err);
+      }
+    };
+
+    const interval = setInterval(checkTranscriptionStatus, pollInterval);
     return () => clearInterval(interval);
-  }, [session?.status, pollWhileProcessing, pollInterval, fetchSession]);
+  }, [session?.status, sessionId, pollWhileProcessing, pollInterval, fetchSession]);
 
   return {
     session,
@@ -77,6 +94,7 @@ export function useSession(
 interface UseSessionsOptions {
   limit?: number;
   status?: string;
+  tagId?: string;
 }
 
 interface UseSessionsReturn {
@@ -90,7 +108,7 @@ interface UseSessionsReturn {
 }
 
 export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn {
-  const { limit = 20, status } = options;
+  const { limit = 20, status, tagId } = options;
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [total, setTotal] = useState(0);
@@ -109,6 +127,10 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn
 
         if (status) {
           params.set("status", status);
+        }
+
+        if (tagId) {
+          params.set("tagId", tagId);
         }
 
         const response = await fetch(`/api/sessions?${params}`);
@@ -135,7 +157,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn
         setIsLoading(false);
       }
     },
-    [limit, status, offset]
+    [limit, status, tagId, offset]
   );
 
   // Initial fetch
@@ -143,7 +165,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn
     setIsLoading(true);
     setOffset(0);
     fetchSessions(true);
-  }, [limit, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [limit, status, tagId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMore = useCallback(async () => {
     if (sessions.length >= total) return;

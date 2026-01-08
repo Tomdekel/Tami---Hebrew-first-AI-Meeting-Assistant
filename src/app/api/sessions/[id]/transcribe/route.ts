@@ -60,15 +60,46 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const audioBlob = await audioResponse.blob();
 
-    // Get transcription service and transcribe
+    // Get transcription service
     const transcriptionService = getTranscriptionService();
-    const { result, detectedLanguage } = await transcriptionService.transcribeWithAutoRouting(
-      audioBlob,
-      {
+
+    // Detect language first (quick Whisper call on ~10 second sample)
+    const sampleSize = Math.min(audioBlob.size, 160000); // ~10 seconds at 128kbps
+    const audioSample = audioBlob.slice(0, sampleSize, audioBlob.type);
+    const detectedLanguage = await transcriptionService.detectLanguage(audioSample);
+
+    // For Hebrew: Use async job submission (Ivrit AI via RunPod)
+    // For English: Use sync Whisper (fast enough for Vercel timeout)
+    if (detectedLanguage === "he") {
+      // Submit async job to Ivrit AI
+      const { jobId } = await transcriptionService.submitAsyncJob(audioBlob, {
         numSpeakers: 10,
         prompt: session.context || undefined,
-      }
-    );
+      });
+
+      // Save job ID and detected language to session
+      await supabase
+        .from("sessions")
+        .update({
+          transcription_job_id: jobId,
+          detected_language: detectedLanguage,
+        })
+        .eq("id", sessionId);
+
+      return NextResponse.json({
+        success: true,
+        async: true,
+        jobId,
+        message: "Transcription job submitted. Poll /transcription-status for updates.",
+      });
+    }
+
+    // For English: Use sync Whisper (completes quickly)
+    const result = await transcriptionService.transcribe(audioBlob, {
+      numSpeakers: 10,
+      prompt: session.context || undefined,
+      language: "en",
+    });
 
     // Save transcript to database
     const { data: transcript, error: transcriptError } = await supabase
@@ -118,6 +149,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({
       success: true,
+      async: false,
       transcript: {
         id: transcript.id,
         language: result.language,

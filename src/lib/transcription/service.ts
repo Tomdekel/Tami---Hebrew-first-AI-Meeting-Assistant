@@ -111,6 +111,36 @@ export class TranscriptionService {
     const whisper = this.getWhisperProvider();
     return await whisper.transcribe(audioBlob, options);
   }
+
+  /**
+   * Submit an async transcription job (for Hebrew via Ivrit AI)
+   * Returns immediately with a job ID that can be polled for status
+   */
+  async submitAsyncJob(
+    audioBlob: Blob,
+    options?: TranscriptionOptions
+  ): Promise<{ jobId: string; provider: "ivrit" | "whisper" }> {
+    // For now, only Ivrit supports async - Whisper is fast enough for sync
+    const ivrit = this.getIvritProvider();
+    const { jobId } = await ivrit.submitJob(audioBlob, options);
+    return { jobId, provider: "ivrit" };
+  }
+
+  /**
+   * Check the status of an async transcription job
+   */
+  async checkAsyncJobStatus(jobId: string) {
+    const ivrit = this.getIvritProvider();
+    return await ivrit.checkJobStatus(jobId);
+  }
+
+  /**
+   * Parse completed async job output into TranscriptResult
+   */
+  parseAsyncJobOutput(jobStatus: Awaited<ReturnType<IvritProvider["checkJobStatus"]>>): TranscriptResult {
+    const ivrit = this.getIvritProvider();
+    return ivrit.parseJobOutput(jobStatus);
+  }
 }
 
 // Singleton instance

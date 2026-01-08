@@ -1,8 +1,10 @@
 export interface TranscriptSegment {
   speaker: string;
+  speakerName?: string;
   text: string;
   start: number;
   end: number;
+  segmentOrder?: number;
 }
 
 export interface TranscriptResult {

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Upload } from "lucide-react";
+import { ArrowLeft, Upload, Loader2, FileAudio, X } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,24 +12,133 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Recorder } from "@/components/recording";
 import { toast } from "sonner";
+import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio";
+import { createSession, startTranscription } from "@/hooks/use-session";
+import { createClient } from "@/lib/supabase/client";
 
 export default function NewMeetingPage() {
   const t = useTranslations();
   const router = useRouter();
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [meetingContext, setMeetingContext] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleRecordingComplete = useCallback(async (blob: Blob) => {
-    toast.success("Recording saved!", {
-      description: `Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`,
-    });
-    // TODO: Upload to Supabase and start transcription
-    console.log("Recording complete:", blob);
-  }, []);
+  // Track chunks during recording
+  const chunkCountRef = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
+  const userIdRef = useRef<string | null>(null);
 
-  const handleChunk = useCallback((chunk: Blob, index: number) => {
-    console.log(`Chunk ${index}:`, chunk.size, "bytes");
-    // TODO: Upload chunk to Supabase Storage for backup
+  const handleRecordingComplete = useCallback(async (blob: Blob, context?: string) => {
+    setIsProcessing(true);
+
+    try {
+      // Get current user
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        toast.error(t("auth.signIn"));
+        setIsProcessing(false);
+        return;
+      }
+
+      // Validate audio for speech content
+      toast.info(t("upload.validating"));
+      const validation = await validateAudioForSpeech(blob);
+
+      if (!validation.isValid) {
+        toast.error(t("upload.validationFailed"), {
+          description: validation.error,
+          duration: 8000,
+        });
+        console.log("Validation details:", formatValidationDetails(validation.details));
+        setIsProcessing(false);
+        return;
+      }
+
+      toast.info(t("upload.processing"));
+
+      // If we have chunks, combine them; otherwise upload the blob directly
+      let audioResult;
+      if (chunkCountRef.current > 0 && sessionIdRef.current) {
+        // Combine chunks
+        audioResult = await combineAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current);
+        // Clean up chunks
+        await deleteAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current);
+
+        // Update session with context if provided
+        if (context) {
+          await fetch(`/api/sessions/${sessionIdRef.current}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ context }),
+          });
+        }
+      } else {
+        // Create a new session first
+        const session = await createSession({
+          title: `Recording ${new Date().toLocaleDateString()}`,
+          context: context || undefined,
+        });
+        sessionIdRef.current = session.id;
+
+        // Upload the complete blob
+        audioResult = await uploadAudioBlob(blob, user.id, session.id);
+
+        // Update session with audio URL
+        await fetch(`/api/sessions/${session.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ audio_url: audioResult.url }),
+        });
+      }
+
+      toast.success(t("upload.success"));
+
+      // Start transcription
+      await startTranscription(sessionIdRef.current!);
+
+      // Navigate to session detail page
+      router.push(`/meetings/${sessionIdRef.current}`);
+    } catch (error) {
+      console.error("Failed to process recording:", error);
+      toast.error(t("upload.failed"), {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setIsProcessing(false);
+      chunkCountRef.current = 0;
+      sessionIdRef.current = null;
+    }
+  }, [router, t]);
+
+  const handleChunk = useCallback(async (chunk: Blob, index: number) => {
+    try {
+      // Get current user
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      // Create session on first chunk if needed
+      if (index === 0 && !sessionIdRef.current) {
+        const session = await createSession({
+          title: `Recording ${new Date().toLocaleDateString()}`,
+        });
+        sessionIdRef.current = session.id;
+        userIdRef.current = user.id;
+      }
+
+      // Upload chunk for backup
+      if (sessionIdRef.current) {
+        await uploadAudioChunk(chunk, user.id, sessionIdRef.current, index);
+        chunkCountRef.current = index + 1;
+      }
+    } catch (error) {
+      console.error(`Failed to upload chunk ${index}:`, error);
+    }
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -37,8 +146,8 @@ export default function NewMeetingPage() {
     if (file) {
       // Validate file type
       if (!file.type.startsWith("audio/") && !file.type.startsWith("video/")) {
-        toast.error("Invalid file type", {
-          description: "Please select an audio or video file",
+        toast.error(t("upload.invalidType"), {
+          description: t("upload.selectAudioFile"),
         });
         return;
       }
@@ -46,22 +155,88 @@ export default function NewMeetingPage() {
     }
   };
 
+  // Auto-upload when file is selected
+  useEffect(() => {
+    if (selectedFile && !isUploading) {
+      handleUpload();
+    }
+  }, [selectedFile]);
+
   const handleUpload = async () => {
     if (!selectedFile) return;
 
     setIsUploading(true);
     try {
-      // TODO: Upload to Supabase Storage and start transcription
-      toast.success("File uploaded!", {
-        description: selectedFile.name,
+      // Get current user
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        toast.error(t("auth.signIn"));
+        setIsUploading(false);
+        return;
+      }
+
+      // Validate audio for speech content
+      toast.info(t("upload.validating"));
+      const validation = await validateAudioForSpeech(selectedFile);
+
+      if (!validation.isValid) {
+        toast.error(t("upload.validationFailed"), {
+          description: validation.error,
+          duration: 8000,
+        });
+        console.log("Validation details:", formatValidationDetails(validation.details));
+        setIsUploading(false);
+        setSelectedFile(null);
+        return;
+      }
+
+      toast.info(t("upload.uploading"));
+
+      // Create session with context
+      const session = await createSession({
+        title: selectedFile.name.replace(/\.[^/.]+$/, ""), // Remove extension
+        context: meetingContext || undefined,
       });
-      console.log("Uploading file:", selectedFile);
+
+      // Upload file
+      const audioResult = await uploadAudioBlob(
+        selectedFile,
+        user.id,
+        session.id,
+        selectedFile.name
+      );
+
+      // Update session with audio URL
+      await fetch(`/api/sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio_url: audioResult.url }),
+      });
+
+      toast.success(t("upload.success"));
+
+      // Start transcription
+      await startTranscription(session.id);
+
+      // Navigate to session detail page
+      router.push(`/meetings/${session.id}`);
     } catch (error) {
-      toast.error("Upload failed", {
+      console.error("Upload failed:", error);
+      toast.error(t("upload.failed"), {
         description: error instanceof Error ? error.message : "Unknown error",
       });
+      setSelectedFile(null);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const clearSelectedFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
@@ -70,11 +245,11 @@ export default function NewMeetingPage() {
       {/* Header */}
       <div className="mb-8">
         <Link
-          href="/"
+          href="/meetings"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4"
         >
           <ArrowLeft className="h-4 w-4 icon-flip-rtl" />
-          Back
+          {t("common.back")}
         </Link>
         <h1 className="text-3xl font-bold">{t("nav.newMeeting")}</h1>
       </div>
@@ -88,54 +263,94 @@ export default function NewMeetingPage() {
 
         {/* Record Tab */}
         <TabsContent value="record" className="space-y-6">
+          {/* Context Field */}
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("upload.contextTitle")}</CardTitle>
+              <CardDescription>
+                {t("upload.contextDesc")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Input
+                placeholder={t("upload.contextPlaceholder")}
+                value={meetingContext}
+                onChange={(e) => setMeetingContext(e.target.value)}
+                disabled={isProcessing}
+              />
+            </CardContent>
+          </Card>
+
           <Recorder
-            onRecordingComplete={handleRecordingComplete}
+            onRecordingComplete={(blob) => handleRecordingComplete(blob, meetingContext)}
             onChunk={handleChunk}
           />
         </TabsContent>
 
         {/* Upload Tab */}
         <TabsContent value="upload">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("upload.title")}</CardTitle>
-              <CardDescription>
-                {t("upload.dropzone")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid w-full items-center gap-4">
-                <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="audio-file">Audio File</Label>
-                  <Input
-                    id="audio-file"
-                    type="file"
-                    accept="audio/*,video/*"
-                    onChange={handleFileChange}
-                    disabled={isUploading}
-                  />
-                </div>
+          <div className="space-y-6">
+            {/* Context Field */}
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("upload.contextTitle")}</CardTitle>
+                <CardDescription>
+                  {t("upload.contextDesc")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Input
+                  placeholder={t("upload.contextPlaceholder")}
+                  value={meetingContext}
+                  onChange={(e) => setMeetingContext(e.target.value)}
+                  disabled={isUploading}
+                />
+              </CardContent>
+            </Card>
 
-                {selectedFile && (
-                  <div className="rounded-lg border p-4 bg-muted/50">
-                    <p className="font-medium">{selectedFile.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+            {/* Upload Area */}
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("upload.selectFile")}</CardTitle>
+                <CardDescription>
+                  {t("upload.supportedFormats")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {isUploading ? (
+                  <div className="flex flex-col items-center justify-center py-8 gap-4">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                    <div className="text-center">
+                      <p className="font-medium">{t("upload.uploading")}</p>
+                      {selectedFile && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileAudio className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                    <p className="font-medium">{t("upload.clickToSelect")}</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {t("upload.orDragDrop")}
                     </p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="audio/*,video/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
                   </div>
                 )}
-
-                <Button
-                  onClick={handleUpload}
-                  disabled={!selectedFile || isUploading}
-                  className="gap-2"
-                >
-                  <Upload className="h-4 w-4" />
-                  {isUploading ? t("upload.uploading") : t("upload.title")}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

@@ -13,6 +13,7 @@ export interface Session {
   audio_url: string | null;
   detected_language: Language | null;
   duration_seconds: number | null;
+  transcription_job_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,12 +37,19 @@ export interface TranscriptSegment {
   segment_order: number;
 }
 
+export interface Decision {
+  description: string;
+  context: string | null;
+}
+
 export interface Summary {
   id: string;
   session_id: string;
   overview: string | null;
   key_points: string[];
+  decisions?: Decision[];
   created_at: string;
+  action_items?: ActionItem[];
 }
 
 export interface ActionItem {
@@ -111,7 +119,7 @@ export interface MemoryEmbedding {
 // Extended types with relations
 export interface SessionWithRelations extends Session {
   transcript?: Transcript & { segments: TranscriptSegment[] };
-  summary?: Summary & { action_items: ActionItem[] };
+  summary?: Summary;
   tags?: Tag[];
   entities?: Entity[];
 }

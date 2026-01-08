@@ -13,10 +13,15 @@ export default function Home() {
       {/* Header */}
       <header className="border-b">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <h1 className="text-2xl font-bold">Tami</h1>
+          <h1 className="text-2xl font-bold">תמי</h1>
           <div className="flex items-center gap-4">
             <LanguageToggle />
-            <Button>{t("auth.signIn")}</Button>
+            <Button variant="ghost" asChild>
+              <Link href="/login">{t("auth.signIn")}</Link>
+            </Button>
+            <Button asChild>
+              <Link href="/signup">{t("auth.signUp")}</Link>
+            </Button>
           </div>
         </div>
       </header>
@@ -25,11 +30,10 @@ export default function Home() {
       <main className="container mx-auto px-4 py-16">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-4xl font-bold tracking-tight sm:text-6xl">
-            Meeting Intelligence
+            {t("home.title")}
           </h2>
           <p className="mt-6 text-lg leading-8 text-muted-foreground">
-            Hebrew-first meeting transcription, summarization, and AI-powered analysis.
-            Record, upload, and get insights from your meetings.
+            {t("home.subtitle")}
           </p>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <Button size="lg" className="gap-2" asChild>
@@ -80,7 +84,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <CardDescription>
-                Automatic transcription with speaker detection in Hebrew and English.
+                {t("home.features.transcriptDesc")}
               </CardDescription>
             </CardContent>
           </Card>
@@ -92,7 +96,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <CardDescription>
-                Ask questions about your meetings and get AI-powered answers.
+                {t("home.features.questionsDesc")}
               </CardDescription>
             </CardContent>
           </Card>
@@ -102,7 +106,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t py-8">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          Tami - Meeting Intelligence Platform
+          {t("home.footer")}
         </div>
       </footer>
     </div>

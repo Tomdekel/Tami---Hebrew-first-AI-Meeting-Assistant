@@ -1,0 +1,262 @@
+{
+  "project": "Tami-2",
+  "description": "Hebrew-first meeting intelligence platform",
+  "version": "0.2.0",
+  "stories": [
+    {
+      "id": "REC-001",
+      "title": "Microphone Recording",
+      "description": "As a user, I can record meetings using my microphone",
+      "acceptance_criteria": [
+        "Start/stop recording with clear visual feedback",
+        "Pause/resume functionality",
+        "Real-time audio waveform visualization",
+        "Duration timer display",
+        "Chunk-based backup every 30 seconds"
+      ],
+      "passes": true
+    },
+    {
+      "id": "REC-002",
+      "title": "System Audio Recording",
+      "description": "As a user, I can record system audio (for online calls)",
+      "acceptance_criteria": [
+        "Capture system audio via screen share",
+        "Same controls as microphone recording",
+        "Works with Zoom/Teams/Meet audio"
+      ],
+      "passes": true
+    },
+    {
+      "id": "REC-003",
+      "title": "Upload Recording",
+      "description": "As a user, I can upload pre-recorded audio/video files",
+      "acceptance_criteria": [
+        "Accept audio and video file formats",
+        "File preview before upload",
+        "Progress indication",
+        "Auto-start transcription after upload"
+      ],
+      "passes": true
+    },
+    {
+      "id": "ASR-001",
+      "title": "Hebrew Transcription (Ivrit AI)",
+      "description": "As a user, my Hebrew recordings are transcribed using Ivrit AI",
+      "acceptance_criteria": [
+        "Automatic Hebrew language detection",
+        "Transcription via RunPod Ivrit endpoint",
+        "Speaker diarization with labels",
+        "Fallback to Whisper on failure"
+      ],
+      "passes": true
+    },
+    {
+      "id": "ASR-002",
+      "title": "English Transcription (Whisper)",
+      "description": "As a user, my English recordings are transcribed using OpenAI Whisper",
+      "acceptance_criteria": [
+        "Automatic English language detection",
+        "Transcription via OpenAI API",
+        "Segment timestamps",
+        "Basic speaker numbering"
+      ],
+      "passes": true
+    },
+    {
+      "id": "ASR-003",
+      "title": "Transcript Display",
+      "description": "As a user, I can view transcripts with speaker segments",
+      "acceptance_criteria": [
+        "Display full transcript text",
+        "Group segments by speaker",
+        "Color-coded speaker badges",
+        "Timestamps per segment"
+      ],
+      "passes": true
+    },
+    {
+      "id": "SES-001",
+      "title": "Session Management",
+      "description": "As a user, I can manage my meeting sessions",
+      "acceptance_criteria": [
+        "List all sessions with pagination",
+        "View session details",
+        "Edit session title and context",
+        "Delete sessions with confirmation"
+      ],
+      "passes": true
+    },
+    {
+      "id": "I18N-001",
+      "title": "Hebrew RTL Interface",
+      "description": "As a Hebrew speaker, the interface is RTL and in Hebrew",
+      "acceptance_criteria": [
+        "Hebrew as default locale",
+        "RTL layout with proper alignment",
+        "Language toggle to English",
+        "All UI text translated"
+      ],
+      "passes": true
+    },
+    {
+      "id": "AUTH-001",
+      "title": "User Authentication",
+      "description": "As a user, I can sign up, sign in, and sign out",
+      "acceptance_criteria": [
+        "Sign up page with email/password",
+        "Sign in page with email/password",
+        "Sign out button in header",
+        "Protected routes redirect to sign in",
+        "Session persistence across page refreshes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "AUTH-002",
+      "title": "Protected Dashboard",
+      "description": "As a user, I can only access the dashboard when authenticated",
+      "acceptance_criteria": [
+        "Dashboard routes require authentication",
+        "Redirect to sign in if not authenticated",
+        "Show user email in header when signed in",
+        "Loading state while checking auth"
+      ],
+      "passes": false
+    },
+    {
+      "id": "CORR-001",
+      "title": "Transcript Correction with GPT-4o",
+      "description": "As a user, I can correct transcript errors using AI assistance",
+      "acceptance_criteria": [
+        "Button to request AI correction on transcript",
+        "GPT-4o processes transcript for grammar/spelling fixes",
+        "Show diff between original and corrected",
+        "Accept/reject correction changes",
+        "Preserve original transcript as backup"
+      ],
+      "passes": false
+    },
+    {
+      "id": "CORR-002",
+      "title": "Manual Transcript Editing",
+      "description": "As a user, I can manually edit transcript segments",
+      "acceptance_criteria": [
+        "Click segment to edit text",
+        "Inline editing with save/cancel",
+        "Edit speaker names",
+        "Changes saved to database"
+      ],
+      "passes": false
+    },
+    {
+      "id": "SUM-001",
+      "title": "Meeting Summary Generation",
+      "description": "As a user, I get an AI-generated summary of my meeting",
+      "acceptance_criteria": [
+        "Auto-generate summary after transcription",
+        "Overview paragraph in Hebrew/English",
+        "Key points as bullet list",
+        "Display summary on meeting detail page"
+      ],
+      "passes": false
+    },
+    {
+      "id": "SUM-002",
+      "title": "Action Item Extraction",
+      "description": "As a user, action items are extracted from my meeting",
+      "acceptance_criteria": [
+        "Extract tasks with assignees and deadlines",
+        "Display action items list",
+        "Mark action items as complete",
+        "Edit/delete action items"
+      ],
+      "passes": false
+    },
+    {
+      "id": "SRCH-001",
+      "title": "Local Meeting Search",
+      "description": "As a user, I can search within a single meeting transcript",
+      "acceptance_criteria": [
+        "Search input on meeting detail page",
+        "Highlight matching text in transcript",
+        "Show match count",
+        "Jump to matches"
+      ],
+      "passes": false
+    },
+    {
+      "id": "SRCH-002",
+      "title": "Global Semantic Search",
+      "description": "As a user, I can search across all my meetings",
+      "acceptance_criteria": [
+        "Global search input in header",
+        "Generate embeddings for transcript chunks",
+        "Vector similarity search",
+        "Show results with context snippets",
+        "Click result to navigate to meeting"
+      ],
+      "passes": false
+    },
+    {
+      "id": "ENT-001",
+      "title": "Entity Extraction",
+      "description": "As a user, named entities are extracted from my meetings",
+      "acceptance_criteria": [
+        "Extract people, organizations, projects, topics",
+        "Store entities in database",
+        "Show extracted entities on meeting page",
+        "Link mentions to source segments"
+      ],
+      "passes": false
+    },
+    {
+      "id": "TAG-001",
+      "title": "Auto-generated Tags",
+      "description": "As a user, meetings are auto-tagged based on content",
+      "acceptance_criteria": [
+        "Auto-create tags from extracted entities",
+        "Display tags on meeting cards",
+        "Filter meetings by tag",
+        "Manage tag visibility"
+      ],
+      "passes": false
+    },
+    {
+      "id": "TAG-002",
+      "title": "Manual Tags",
+      "description": "As a user, I can manually add tags to meetings",
+      "acceptance_criteria": [
+        "Add custom tags to meetings",
+        "Create new tags with colors",
+        "Remove tags from meetings",
+        "Tag autocomplete from existing tags"
+      ],
+      "passes": false
+    },
+    {
+      "id": "CHAT-001",
+      "title": "Meeting Q&A Chat",
+      "description": "As a user, I can ask questions about my meeting",
+      "acceptance_criteria": [
+        "Chat interface on meeting detail page",
+        "Send questions about meeting content",
+        "AI responses based on transcript context",
+        "Chat history persisted"
+      ],
+      "passes": false
+    },
+    {
+      "id": "CHAT-002",
+      "title": "Cross-Meeting Q&A",
+      "description": "As a user, I can ask questions across all my meetings",
+      "acceptance_criteria": [
+        "Global Q&A interface",
+        "Search across all meeting transcripts",
+        "Cite source meetings in responses",
+        "Follow-up questions in context"
+      ],
+      "passes": false
+    }
+  ]
+}

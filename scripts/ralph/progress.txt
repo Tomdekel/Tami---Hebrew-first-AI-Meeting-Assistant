@@ -1,0 +1,103 @@
+# Ralph Progress Log - Tami-2
+# Started: 2025-01-07
+
+## Codebase Patterns Learned
+
+### Directory Structure
+- src/app/ - Next.js App Router (pages, layouts, API routes)
+- src/app/(dashboard)/ - Layout group for authenticated pages
+- src/components/ui/ - shadcn/ui components (Button, Card, Dialog, Tabs, Badge, Input, Label, etc.)
+- src/components/recording/ - Recording-specific components (Recorder, ModeSelector, Timer, Waveform)
+- src/hooks/ - React hooks (useSession, useRecording, useWaveform)
+- src/lib/supabase/ - Supabase clients (client.ts for browser, server.ts for server)
+- src/lib/transcription/ - ASR services (Whisper, Ivrit AI, Service orchestrator)
+- src/lib/types/database.ts - TypeScript types for all 11 database tables
+- supabase/migrations/ - SQL schema (20250107_initial_schema.sql)
+- messages/ - i18n translations (he.json, en.json)
+
+### Key Files
+- src/app/page.tsx - Landing page with hero + features
+- src/app/(dashboard)/layout.tsx - Dashboard header with nav, language toggle
+- src/app/(dashboard)/meetings/page.tsx - Sessions list with pagination
+- src/app/(dashboard)/meetings/new/page.tsx - Record/Upload tabs
+- src/app/(dashboard)/meetings/[id]/page.tsx - Meeting detail with transcript
+- src/app/api/sessions/route.ts - GET (list), POST (create) sessions
+- src/app/api/sessions/[id]/route.ts - GET, PATCH, DELETE single session
+- src/app/api/sessions/[id]/transcribe/route.ts - POST start transcription
+
+### Database Tables (all with RLS)
+1. sessions - Meeting recordings (status: pending/recording/processing/completed/failed)
+2. transcripts - Full text + language
+3. transcript_segments - Speaker diarization (speaker_id, speaker_name, text, timestamps)
+4. summaries - overview + key_points (JSONB)
+5. action_items - description, assignee, deadline, completed
+6. entities - type (person/org/project/topic/etc), value, normalized_value
+7. entity_mentions - links entities to sessions with context
+8. tags - name, color, source (manual/auto:person/auto:organization/etc)
+9. session_tags - many-to-many junction
+10. chat_messages - role (user/assistant), content
+11. memory_embeddings - chunk_text, embedding (VECTOR 768), IVFFlat index
+
+### API Patterns
+- Auth check: const { data: { user }, error } = await supabase.auth.getUser()
+- Return 401 if !user
+- All queries filter by user_id via RLS
+- Response format: { resource: data } or { error: message }
+- Status codes: 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Internal
+
+### Component Patterns
+- Server Components by default (no directive)
+- "use client" for interactive components
+- shadcn/ui imports from @/components/ui/
+- cn() from @/lib/utils for conditional classes
+- useTranslations("namespace") for i18n
+- RTL-aware: use start/end not left/right
+
+### Hook Patterns (src/hooks/)
+- useSession(id) - fetch single session with polling, startTranscription()
+- useSessions({ limit, offset }) - fetch paginated list
+- createSession(), updateSession(), deleteSession() - mutation functions
+- useRecording() - mic/system audio capture, pause/resume, chunks
+- useWaveform() - audio visualization data
+
+### Transcription Flow
+1. POST /api/sessions/[id]/transcribe
+2. Fetch audio blob from session.audio_url
+3. Detect language (first 10s) - Hebrew vs English
+4. Route: Hebrew → Ivrit AI, English → Whisper
+5. Parse response into segments with speakers
+6. Save transcript + segments to DB
+7. Update session status to completed (or failed)
+
+### Environment Variables
+- NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+- OPENAI_API_KEY (Whisper + GPT)
+- IVRIT_API_KEY, IVRIT_ENDPOINT_ID (Hebrew ASR via RunPod)
+
+### UI Components Available (shadcn/ui)
+- Button (variant: default/destructive/outline/secondary/ghost/link)
+- Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter
+- Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription
+- Tabs, TabsList, TabsTrigger, TabsContent
+- Badge (variant: default/secondary/destructive/outline)
+- Input, Label
+- DropdownMenu (and sub-components)
+- Alert, AlertTitle, AlertDescription
+- Separator
+- Sonner (toast notifications)
+
+### Status Badge Colors
+- pending: bg-gray-100 text-gray-800
+- recording: bg-red-100 text-red-800 (+ pulsing dot)
+- processing: bg-yellow-100 text-yellow-800
+- completed: bg-green-100 text-green-800
+- failed: bg-red-100 text-red-800
+
+---
+
+## Implementation Progress
+
+[2025-01-07] INIT: Ralph setup complete
+- Created ralph.sh, prompt.md, prd.json, progress.txt
+- Analyzed codebase: 43 files, ~4,120 lines
+- Identified 8 completed features, 13 remaining stories

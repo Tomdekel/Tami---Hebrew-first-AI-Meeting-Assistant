@@ -234,3 +234,222 @@ export async function extractAudioSample(
   // For production, use Web Audio API to properly slice the audio
   return blob.slice(0, targetBytes, blob.type);
 }
+
+// ============================================================================
+// Audio Validation
+// ============================================================================
+
+export interface AudioValidationResult {
+  isValid: boolean;
+  error?: string;
+  details: {
+    duration: number; // seconds
+    avgAmplitude: number; // 0-1
+    peakAmplitude: number; // 0-1
+    silenceRatio: number; // 0-1 (percentage of audio that is silence)
+    hasLikelySpeech: boolean;
+  };
+}
+
+// Minimum thresholds for valid audio
+const MIN_DURATION_SECONDS = 1;
+const MAX_DURATION_SECONDS = 7200; // 2 hours
+const MIN_AVERAGE_AMPLITUDE = 0.005; // Very quiet audio threshold
+const MIN_PEAK_AMPLITUDE = 0.02; // At least some audible content
+const MAX_SILENCE_RATIO = 0.95; // If 95%+ is silence, likely no speech
+const SILENCE_THRESHOLD = 0.01; // Below this is considered silence
+
+/**
+ * Validate an audio blob for speech content
+ * Uses Web Audio API to analyze the audio
+ */
+export async function validateAudioForSpeech(
+  audioBlob: Blob
+): Promise<AudioValidationResult> {
+  try {
+    // WebM/Opus files from MediaRecorder often cannot be decoded by Web Audio API
+    // Skip validation for these formats and trust the recording
+    const isWebM = audioBlob.type.includes("webm") || audioBlob.type.includes("opus");
+
+    if (isWebM) {
+      // For WebM/Opus from MediaRecorder, we can't easily validate
+      // Just check basic size/duration constraints
+      // WebM files have headers even when very short, so check for minimum content
+      const minSizeBytes = 1000; // 1KB minimum - just needs some audio data
+
+      if (audioBlob.size < minSizeBytes) {
+        return {
+          isValid: false,
+          error: "Recording is too short. Please record at least a few seconds of audio.",
+          details: {
+            duration: 0,
+            avgAmplitude: 0,
+            peakAmplitude: 0,
+            silenceRatio: 0,
+            hasLikelySpeech: true,
+          },
+        };
+      }
+
+      // Estimate duration from file size (very rough: ~16KB/sec for 128kbps)
+      const estimatedDuration = audioBlob.size / 16000;
+
+      if (estimatedDuration > MAX_DURATION_SECONDS) {
+        return {
+          isValid: false,
+          error: "Audio is too long. Maximum duration is 2 hours.",
+          details: {
+            duration: estimatedDuration,
+            avgAmplitude: 0,
+            peakAmplitude: 0,
+            silenceRatio: 0,
+            hasLikelySpeech: true,
+          },
+        };
+      }
+
+      // For WebM, assume it's valid and let the transcription service handle it
+      return {
+        isValid: true,
+        details: {
+          duration: estimatedDuration,
+          avgAmplitude: 0.5, // Unknown, assume valid
+          peakAmplitude: 0.5, // Unknown, assume valid
+          silenceRatio: 0, // Unknown, assume valid
+          hasLikelySpeech: true, // Assume true for WebM
+        },
+      };
+    }
+
+    // For non-WebM formats (MP3, WAV, M4A), use Web Audio API validation
+    // Convert blob to array buffer
+    const arrayBuffer = await audioBlob.arrayBuffer();
+
+    // Create audio context and decode
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const audioContext = new AudioContextClass();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    // Get audio data from first channel
+    const channelData = audioBuffer.getChannelData(0);
+    const duration = audioBuffer.duration;
+
+    // Analyze audio levels
+    let sum = 0;
+    let peak = 0;
+    let silentSamples = 0;
+
+    for (let i = 0; i < channelData.length; i++) {
+      const amplitude = Math.abs(channelData[i]);
+      sum += amplitude;
+      if (amplitude > peak) peak = amplitude;
+      if (amplitude < SILENCE_THRESHOLD) silentSamples++;
+    }
+
+    const avgAmplitude = sum / channelData.length;
+    const silenceRatio = silentSamples / channelData.length;
+
+    // Determine if likely has speech (simple heuristic)
+    const hasLikelySpeech =
+      avgAmplitude > MIN_AVERAGE_AMPLITUDE &&
+      peak > MIN_PEAK_AMPLITUDE &&
+      silenceRatio < MAX_SILENCE_RATIO;
+
+    const details = {
+      duration,
+      avgAmplitude,
+      peakAmplitude: peak,
+      silenceRatio,
+      hasLikelySpeech,
+    };
+
+    // Close audio context
+    await audioContext.close();
+
+    // Validate duration
+    if (duration < MIN_DURATION_SECONDS) {
+      return {
+        isValid: false,
+        error: "Audio is too short. Please record at least 1 second of audio.",
+        details,
+      };
+    }
+
+    if (duration > MAX_DURATION_SECONDS) {
+      return {
+        isValid: false,
+        error: "Audio is too long. Maximum duration is 2 hours.",
+        details,
+      };
+    }
+
+    // Validate content
+    if (peak < MIN_PEAK_AMPLITUDE) {
+      return {
+        isValid: false,
+        error: "Audio appears to be completely silent or very quiet. Please check your microphone settings.",
+        details,
+      };
+    }
+
+    if (avgAmplitude < MIN_AVERAGE_AMPLITUDE) {
+      return {
+        isValid: false,
+        error: "Audio levels are too low. The recording may be mostly silence.",
+        details,
+      };
+    }
+
+    if (silenceRatio > MAX_SILENCE_RATIO) {
+      return {
+        isValid: false,
+        error: "The recording contains mostly silence with very little speech detected.",
+        details,
+      };
+    }
+
+    if (!hasLikelySpeech) {
+      return {
+        isValid: false,
+        error: "No speech detected in the audio. Please ensure the recording contains audible speech.",
+        details,
+      };
+    }
+
+    return {
+      isValid: true,
+      details,
+    };
+  } catch (error) {
+    return {
+      isValid: false,
+      error: `Failed to analyze audio: ${error instanceof Error ? error.message : "Unknown error"}`,
+      details: {
+        duration: 0,
+        avgAmplitude: 0,
+        peakAmplitude: 0,
+        silenceRatio: 1,
+        hasLikelySpeech: false,
+      },
+    };
+  }
+}
+
+/**
+ * Format validation details for display
+ */
+export function formatValidationDetails(details: AudioValidationResult["details"]): string {
+  const duration = Math.round(details.duration);
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+  const durationStr = minutes > 0
+    ? `${minutes}m ${seconds}s`
+    : `${seconds}s`;
+
+  const silencePercent = Math.round(details.silenceRatio * 100);
+  const avgDb = details.avgAmplitude > 0
+    ? Math.round(20 * Math.log10(details.avgAmplitude))
+    : -100;
+
+  return `Duration: ${durationStr} | Silence: ${silencePercent}% | Avg level: ${avgDb}dB`;
+}

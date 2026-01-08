@@ -4,12 +4,28 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 export type RecordingMode = "microphone" | "system";
 export type RecordingState = "idle" | "requesting" | "recording" | "paused" | "stopped";
+export type DurationWarningLevel = "soft" | "strong" | "final";
+
+// Default warning thresholds in seconds
+const DEFAULT_SOFT_WARNING = 60 * 60; // 1 hour
+const DEFAULT_STRONG_WARNING = 90 * 60; // 1.5 hours
+const DEFAULT_MAX_DURATION = 120 * 60; // 2 hours
+
+export interface DurationWarning {
+  level: DurationWarningLevel;
+  remainingSeconds: number;
+  message: string;
+}
 
 export interface RecordingOptions {
   mode: RecordingMode;
   onChunk?: (chunk: Blob, index: number) => void;
   onError?: (error: Error) => void;
+  onDurationWarning?: (warning: DurationWarning) => void;
   chunkInterval?: number; // milliseconds, default 30000 (30 seconds)
+  softWarningAt?: number; // seconds, default 3600 (1 hour)
+  strongWarningAt?: number; // seconds, default 5400 (1.5 hours)
+  maxDuration?: number; // seconds, default 7200 (2 hours), 0 to disable
 }
 
 export interface UseRecordingReturn {
@@ -22,10 +38,20 @@ export interface UseRecordingReturn {
   stop: () => void;
   pause: () => void;
   resume: () => void;
+  reset: () => void;
 }
 
 export function useRecording(options: RecordingOptions): UseRecordingReturn {
-  const { mode, onChunk, onError, chunkInterval = 30000 } = options;
+  const {
+    mode,
+    onChunk,
+    onError,
+    onDurationWarning,
+    chunkInterval = 30000,
+    softWarningAt = DEFAULT_SOFT_WARNING,
+    strongWarningAt = DEFAULT_STRONG_WARNING,
+    maxDuration = DEFAULT_MAX_DURATION,
+  } = options;
 
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
@@ -39,13 +65,65 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
   const startTimeRef = useRef<number>(0);
   const pausedDurationRef = useRef<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const softWarningShownRef = useRef(false);
+  const strongWarningShownRef = useRef(false);
 
-  // Update duration every second while recording
+  // Update duration every second while recording + check for warnings
   useEffect(() => {
     if (state === "recording") {
       timerRef.current = setInterval(() => {
         const elapsed = Date.now() - startTimeRef.current + pausedDurationRef.current;
-        setDuration(Math.floor(elapsed / 1000));
+        const currentDuration = Math.floor(elapsed / 1000);
+        setDuration(currentDuration);
+
+        // Check for auto-stop at max duration
+        if (maxDuration > 0 && currentDuration >= maxDuration) {
+          if (onDurationWarning) {
+            onDurationWarning({
+              level: "final",
+              remainingSeconds: 0,
+              message: "Maximum recording duration reached. Recording stopped automatically.",
+            });
+          }
+          // Auto-stop the recording
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.stop();
+          }
+          return;
+        }
+
+        // Check for strong warning (1.5 hours)
+        if (
+          strongWarningAt > 0 &&
+          currentDuration >= strongWarningAt &&
+          !strongWarningShownRef.current
+        ) {
+          strongWarningShownRef.current = true;
+          if (onDurationWarning) {
+            const remaining = maxDuration - currentDuration;
+            onDurationWarning({
+              level: "strong",
+              remainingSeconds: remaining,
+              message: `Recording will stop in ${Math.round(remaining / 60)} minutes. Please wrap up soon.`,
+            });
+          }
+        }
+        // Check for soft warning (1 hour)
+        else if (
+          softWarningAt > 0 &&
+          currentDuration >= softWarningAt &&
+          !softWarningShownRef.current
+        ) {
+          softWarningShownRef.current = true;
+          if (onDurationWarning) {
+            const remaining = maxDuration - currentDuration;
+            onDurationWarning({
+              level: "soft",
+              remainingSeconds: remaining,
+              message: `You've been recording for 1 hour. ${Math.round(remaining / 60)} minutes remaining.`,
+            });
+          }
+        }
       }, 1000);
     } else {
       if (timerRef.current) {
@@ -59,7 +137,7 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
         clearInterval(timerRef.current);
       }
     };
-  }, [state]);
+  }, [state, softWarningAt, strongWarningAt, maxDuration, onDurationWarning]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -117,9 +195,12 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
       setState("requesting");
       setError(null);
       setAudioBlob(null);
+      setDuration(0);
       chunksRef.current = [];
       chunkIndexRef.current = 0;
       pausedDurationRef.current = 0;
+      softWarningShownRef.current = false;
+      strongWarningShownRef.current = false;
 
       // Get the appropriate stream based on mode
       const audioStream =
@@ -207,6 +288,28 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     }
   }, []);
 
+  const reset = useCallback(() => {
+    // Stop any active recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    // Stop any active stream
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+    // Reset all state
+    setAudioBlob(null);
+    setError(null);
+    setDuration(0);
+    setState("idle");
+    setStream(null);
+    chunksRef.current = [];
+    chunkIndexRef.current = 0;
+    pausedDurationRef.current = 0;
+    softWarningShownRef.current = false;
+    strongWarningShownRef.current = false;
+  }, [stream]);
+
   return {
     state,
     duration,
@@ -217,5 +320,6 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     stop,
     pause,
     resume,
+    reset,
   };
 }

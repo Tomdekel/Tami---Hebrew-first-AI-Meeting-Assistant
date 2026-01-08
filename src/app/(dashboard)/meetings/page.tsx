@@ -1,20 +1,21 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Plus, Loader2, Mic, Clock, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
+import { Plus, Loader2, Mic, Clock, CheckCircle2, AlertCircle, XCircle, Tag as TagIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSessions } from "@/hooks/use-session";
-import type { SessionStatus } from "@/lib/types/database";
+import type { SessionStatus, Tag } from "@/lib/types/database";
 
-const statusConfig: Record<SessionStatus, { icon: React.ReactNode; label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  pending: { icon: <Clock className="h-3 w-3" />, label: "Pending", variant: "secondary" },
-  recording: { icon: <Mic className="h-3 w-3 animate-pulse text-red-500" />, label: "Recording", variant: "destructive" },
-  processing: { icon: <Loader2 className="h-3 w-3 animate-spin" />, label: "Processing", variant: "default" },
-  completed: { icon: <CheckCircle2 className="h-3 w-3" />, label: "Completed", variant: "outline" },
-  failed: { icon: <XCircle className="h-3 w-3" />, label: "Failed", variant: "destructive" },
+const statusIcons: Record<SessionStatus, { icon: React.ReactNode; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  pending: { icon: <Clock className="h-3 w-3" />, variant: "secondary" },
+  recording: { icon: <Mic className="h-3 w-3 animate-pulse text-red-500" />, variant: "destructive" },
+  processing: { icon: <Loader2 className="h-3 w-3 animate-spin" />, variant: "default" },
+  completed: { icon: <CheckCircle2 className="h-3 w-3" />, variant: "outline" },
+  failed: { icon: <XCircle className="h-3 w-3" />, variant: "destructive" },
 };
 
 function formatDuration(seconds: number | null): string {
@@ -37,7 +38,31 @@ function formatDate(dateString: string): string {
 
 export default function MeetingsPage() {
   const t = useTranslations();
-  const { sessions, isLoading, error, hasMore, loadMore } = useSessions();
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTagId, setSelectedTagId] = useState<string | undefined>();
+  const [tagsLoading, setTagsLoading] = useState(true);
+
+  const { sessions, isLoading, error, hasMore, loadMore } = useSessions({
+    tagId: selectedTagId,
+  });
+
+  // Fetch tags on mount
+  useEffect(() => {
+    const fetchTags = async () => {
+      try {
+        const response = await fetch("/api/tags");
+        if (response.ok) {
+          const data = await response.json();
+          setTags(data.tags || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch tags:", error);
+      } finally {
+        setTagsLoading(false);
+      }
+    };
+    fetchTags();
+  }, []);
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8">
@@ -46,7 +71,7 @@ export default function MeetingsPage() {
         <div>
           <h1 className="text-3xl font-bold">{t("nav.meetings")}</h1>
           <p className="text-muted-foreground mt-1">
-            Your recorded meetings and transcriptions
+            {t("meeting.yourMeetings")}
           </p>
         </div>
         <Button asChild>
@@ -56,6 +81,44 @@ export default function MeetingsPage() {
           </Link>
         </Button>
       </div>
+
+      {/* Tag Filter */}
+      {!tagsLoading && tags.length > 0 && (
+        <div className="flex items-center gap-2 mb-6 flex-wrap">
+          <TagIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+          <button
+            onClick={() => setSelectedTagId(undefined)}
+            className={`px-3 py-1 rounded-full text-sm transition-colors ${
+              !selectedTagId
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted hover:bg-muted/80 text-muted-foreground"
+            }`}
+          >
+            {t("common.all") || "All"}
+          </button>
+          {tags.map((tag) => (
+            <button
+              key={tag.id}
+              onClick={() => setSelectedTagId(tag.id === selectedTagId ? undefined : tag.id)}
+              className={`px-3 py-1 rounded-full text-sm transition-colors flex items-center gap-1 ${
+                selectedTagId === tag.id
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted hover:bg-muted/80 text-muted-foreground"
+              }`}
+              style={
+                selectedTagId !== tag.id && tag.color
+                  ? { borderLeft: `3px solid ${tag.color}` }
+                  : undefined
+              }
+            >
+              {tag.name}
+              {selectedTagId === tag.id && (
+                <X className="h-3 w-3 ms-1" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Sessions List */}
       {isLoading ? (
@@ -73,14 +136,14 @@ export default function MeetingsPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Mic className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium mb-2">No meetings yet</h3>
+            <h3 className="text-lg font-medium mb-2">{t("meeting.noMeetingsYet")}</h3>
             <p className="text-muted-foreground text-center mb-4">
-              Start recording a meeting or upload an existing audio file.
+              {t("meeting.noMeetingsDesc")}
             </p>
             <Button asChild>
               <Link href="/meetings/new">
                 <Plus className="h-4 w-4 me-2" />
-                New Meeting
+                {t("nav.newMeeting")}
               </Link>
             </Button>
           </CardContent>
@@ -88,7 +151,7 @@ export default function MeetingsPage() {
       ) : (
         <div className="space-y-4">
           {sessions.map((session) => {
-            const status = statusConfig[session.status];
+            const status = statusIcons[session.status];
             return (
               <Link key={session.id} href={`/meetings/${session.id}`}>
                 <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
@@ -96,7 +159,7 @@ export default function MeetingsPage() {
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <CardTitle className="text-lg truncate">
-                          {session.title || "Untitled Meeting"}
+                          {session.title || t("meeting.untitled")}
                         </CardTitle>
                         <CardDescription className="truncate">
                           {formatDate(session.created_at)}
@@ -104,7 +167,7 @@ export default function MeetingsPage() {
                       </div>
                       <Badge variant={status.variant} className="gap-1 shrink-0 ms-4">
                         {status.icon}
-                        {status.label}
+                        {t(`meeting.${session.status}`)}
                       </Badge>
                     </div>
                   </CardHeader>
@@ -116,7 +179,7 @@ export default function MeetingsPage() {
                       </span>
                       {session.detected_language && (
                         <Badge variant="outline" className="text-xs">
-                          {session.detected_language === "he" ? "Hebrew" : "English"}
+                          {session.detected_language === "he" ? t("meeting.hebrew") : t("meeting.english")}
                         </Badge>
                       )}
                       {session.context && (
@@ -132,7 +195,7 @@ export default function MeetingsPage() {
           {hasMore && (
             <div className="flex justify-center pt-4">
               <Button variant="outline" onClick={loadMore}>
-                Load More
+                {t("meeting.loadMore")}
               </Button>
             </div>
           )}
