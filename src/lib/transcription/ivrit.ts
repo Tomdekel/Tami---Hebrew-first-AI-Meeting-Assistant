@@ -66,13 +66,18 @@ export class IvritProvider implements TranscriptionProvider {
     // Convert blob to base64
     const base64Audio = await this.blobToBase64(audioBlob);
 
+    // Ivrit AI RunPod endpoint expects this specific format
+    // See: https://github.com/ivrit-ai/runpod-serverless
     const requestBody = {
       input: {
-        audio_base64: base64Audio,
-        language: "he",
-        task: "transcribe",
-        diarize: true,
-        num_speakers: options?.numSpeakers || 10,
+        engine: "faster-whisper",
+        model: "ivrit-ai/whisper-large-v3-turbo-ct2",
+        transcribe_args: {
+          blob: base64Audio,
+          language: "he",
+          diarize: true,
+          num_speakers: options?.numSpeakers || 10,
+        },
       },
     };
 
@@ -133,13 +138,18 @@ export class IvritProvider implements TranscriptionProvider {
   ): Promise<{ jobId: string }> {
     const base64Audio = await this.blobToBase64(audioBlob);
 
+    // Ivrit AI RunPod endpoint expects this specific format
+    // See: https://github.com/ivrit-ai/runpod-serverless
     const requestBody = {
       input: {
-        audio_base64: base64Audio,
-        language: "he",
-        task: "transcribe",
-        diarize: true,
-        num_speakers: options?.numSpeakers || 10,
+        engine: "faster-whisper",
+        model: "ivrit-ai/whisper-large-v3-turbo-ct2",
+        transcribe_args: {
+          blob: base64Audio,
+          language: "he",
+          diarize: true,
+          num_speakers: options?.numSpeakers || 10,
+        },
       },
     };
 
