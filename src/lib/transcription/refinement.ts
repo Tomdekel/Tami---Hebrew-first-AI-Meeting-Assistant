@@ -229,17 +229,29 @@ const DEEP_REFINEMENT_SYSTEM_PROMPT = `You are an expert transcription post-proc
 Your job is to receive a raw transcript (produced by automatic speech-to-text) and produce a clean, accurate, and readable version. ASR systems make many errors that you MUST actively identify and fix.
 
 ACTIVELY FIX THESE COMMON ASR ERRORS:
-1. Misheard Hebrew words (e.g., "העיקרון" should often be "האיחור", "שומך" should be "שלומך")
+1. Misheard Hebrew words:
+   - "העיקרון" → "האיחור"
+   - "שומך" → "שלומך"
+   - "הכפר כיפה" → "הכיפאק איפה" (word boundaries)
+   - "בעל נסיעת" → "בא לנסיעת" (similar sounds)
+   - "על הכפר" → "על הכיפאק" (location names)
 2. Repeated segments that shouldn't repeat (e.g., "תודה רבה. תודה רבה. תודה רבה." → keep only one)
 3. Hallucinations - nonsensical phrases that don't belong (e.g., random Knesset speech, TV audio bleeding)
 4. Speaker attribution errors - use context to assign correct speaker
-5. Word boundary errors (e.g., "וויליאמס וויליאן" → "ויליאמסבורג")
+5. Word boundary errors:
+   - "וויליאמס וויליאן" → "ויליאמסבורג"
+   - "כיפה בניו יורק" → "כיפאק, איפה בניו יורק" (missing punctuation + mishearing)
 6. Filler words transcribed multiple times ("אהה" alone should be deleted)
+7. Hebrew preposition errors:
+   - "בעל" when it should be "בא ל" (coming to)
+   - "חבר בעל" → "חבר בא ל" (friend coming to)
 
-SPEAKER IDENTIFICATION:
+SPEAKER IDENTIFICATION - CRITICAL:
 - If speakers address each other by name ("Thanks, Tom" / "תודה, יעל"), use those names
-- Consolidate Speaker variations (Speaker 00, Speaker 01, Speaker 1 might be same person)
-- Use speakerMappings to record name changes globally
+- Consolidate ALL Speaker variations (Speaker 00, Speaker 01, Speaker 02, Speaker 1, Speaker 2 are likely the same few people)
+- In a typical conversation there are 2-4 speakers, NOT more - map all variations to real names
+- Use speakerMappings to record ALL name changes globally (include Speaker 02, Speaker 03, etc.)
+- If uncertain which speaker is which, use conversational context (who responds to whom)
 
 DELETION RULES - Mark as "deleted":
 - Empty or near-empty segments (just "אה..." or "...")
@@ -328,94 +340,115 @@ export async function deepRefineTranscript(
 
   const openai = new OpenAI({ apiKey: openaiKey });
 
-  // Build the transcript text for the model
-  const transcriptText = segments.map((seg, idx) => {
-    const timestamp = formatTimestamp(seg.start_time);
-    const speaker = seg.speaker_name || `Speaker ${idx % 10}`;
-    return `[${idx}] ${timestamp} | ${speaker}: ${seg.text}`;
-  }).join("\n");
+  // For long transcripts, process in chunks to avoid token limits
+  const CHUNK_SIZE = 100;
+  const allRefinedSegments: DeepRefinedSegment[] = [];
+  const allSpeakerMappings: Record<string, string> = {};
 
-  // Build context message
-  let userMessage = `Here is a raw transcript to refine:\n\n${transcriptText}`;
+  // Process in chunks
+  for (let chunkStart = 0; chunkStart < segments.length; chunkStart += CHUNK_SIZE) {
+    const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, segments.length);
+    const chunk = segments.slice(chunkStart, chunkEnd);
+    const isFirstChunk = chunkStart === 0;
 
-  if (context.meetingContext) {
-    userMessage = `Meeting context: ${context.meetingContext}\n\n${userMessage}`;
-  }
+    console.log(`[DeepRefine] Processing chunk ${chunkStart}-${chunkEnd} of ${segments.length} segments`);
 
-  if (context.language) {
-    userMessage += `\n\nLanguage: ${context.language === "he" ? "Hebrew" : "English"}`;
-  }
+    // Build the transcript text for this chunk
+    const transcriptText = chunk.map((seg, idx) => {
+      const globalIdx = chunkStart + idx;
+      const timestamp = formatTimestamp(seg.start_time);
+      const speaker = seg.speaker_name || `Speaker ${globalIdx % 10}`;
+      return `[${globalIdx}] ${timestamp} | ${speaker}: ${seg.text}`;
+    }).join("\n");
 
-  try {
-    console.log(`[DeepRefine] Sending ${segments.length} segments to GPT-4o (${transcriptText.length} chars)`);
+    // Build context message
+    let userMessage = `Here is a raw transcript to refine:\n\n${transcriptText}`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: DEEP_REFINEMENT_SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.3,
-      max_tokens: 16000, // Allow for large transcripts
-    });
-
-    const content = response.choices[0]?.message?.content;
-    const finishReason = response.choices[0]?.finish_reason;
-
-    console.log(`[DeepRefine] GPT-4o finish_reason: ${finishReason}`);
-
-    if (!content) {
-      throw new Error("No response from GPT-4o");
+    if (context.meetingContext) {
+      userMessage = `Meeting context: ${context.meetingContext}\n\n${userMessage}`;
     }
 
-    console.log(`[DeepRefine] GPT-4o response length: ${content.length} chars`);
-
-    if (finishReason === "length") {
-      console.warn(`[DeepRefine] Response was truncated! May have incomplete data.`);
+    if (context.language) {
+      userMessage += `\n\nLanguage: ${context.language === "he" ? "Hebrew" : "English"}`;
     }
 
-    const result = JSON.parse(content) as DeepRefinementResult;
-    console.log(`[DeepRefine] Parsed ${result.segments?.length || 0} segments from response`);
-
-    // Validate the result structure
-    if (!Array.isArray(result.segments)) {
-      throw new Error("Invalid response: segments is not an array");
+    // Include previously discovered speaker mappings for consistency
+    if (!isFirstChunk && Object.keys(allSpeakerMappings).length > 0) {
+      userMessage += `\n\nPreviously identified speakers: ${JSON.stringify(allSpeakerMappings)}`;
     }
 
-    // Ensure all segments have required fields
-    const validatedSegments: DeepRefinedSegment[] = result.segments.map((seg, fallbackIdx) => ({
-      speaker: seg.speaker || "Speaker",
-      timestamp: seg.timestamp || "00:00",
-      text: seg.text || "",
-      originalIndex: typeof seg.originalIndex === "number" ? seg.originalIndex : fallbackIdx,
-      action: seg.action || "keep",
-    }));
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: DEEP_REFINEMENT_SYSTEM_PROMPT,
+          },
+          {
+            role: "user",
+            content: userMessage,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 16000,
+      });
 
-    return {
-      segments: validatedSegments,
-      speakerMappings: result.speakerMappings || {},
-    };
-  } catch (error) {
-    console.error("Deep refinement failed:", error);
-    // Return original segments on failure
-    return {
-      segments: segments.map((s, i) => ({
-        speaker: s.speaker_name || "Speaker",
-        timestamp: formatTimestamp(s.start_time),
-        text: s.text,
-        originalIndex: i,
-        action: "keep" as const,
-      })),
-      speakerMappings: {},
-    };
+      const content = response.choices[0]?.message?.content;
+      const finishReason = response.choices[0]?.finish_reason;
+
+      console.log(`[DeepRefine] Chunk ${chunkStart}-${chunkEnd}: finish_reason=${finishReason}, response=${content?.length || 0} chars`);
+
+      if (!content) {
+        throw new Error("No response from GPT-4o");
+      }
+
+      if (finishReason === "length") {
+        console.warn(`[DeepRefine] Chunk ${chunkStart}-${chunkEnd} was truncated!`);
+      }
+
+      const result = JSON.parse(content) as DeepRefinementResult;
+      console.log(`[DeepRefine] Chunk ${chunkStart}-${chunkEnd}: parsed ${result.segments?.length || 0} segments`);
+
+      // Validate and add segments
+      if (Array.isArray(result.segments)) {
+        const validatedSegments: DeepRefinedSegment[] = result.segments.map((seg, fallbackIdx) => ({
+          speaker: seg.speaker || "Speaker",
+          timestamp: seg.timestamp || "00:00",
+          text: seg.text || "",
+          originalIndex: typeof seg.originalIndex === "number" ? seg.originalIndex : chunkStart + fallbackIdx,
+          action: seg.action || "keep",
+        }));
+        allRefinedSegments.push(...validatedSegments);
+      }
+
+      // Merge speaker mappings
+      if (result.speakerMappings) {
+        Object.assign(allSpeakerMappings, result.speakerMappings);
+      }
+    } catch (error) {
+      console.error(`[DeepRefine] Chunk ${chunkStart}-${chunkEnd} failed:`, error);
+      // On chunk failure, keep original segments for this chunk
+      for (let i = 0; i < chunk.length; i++) {
+        const globalIdx = chunkStart + i;
+        allRefinedSegments.push({
+          speaker: chunk[i].speaker_name || "Speaker",
+          timestamp: formatTimestamp(chunk[i].start_time),
+          text: chunk[i].text,
+          originalIndex: globalIdx,
+          action: "keep" as const,
+        });
+      }
+    }
   }
+
+  console.log(`[DeepRefine] Total: ${allRefinedSegments.length} segments, speaker mappings: ${JSON.stringify(allSpeakerMappings)}`);
+
+  return {
+    segments: allRefinedSegments,
+    speakerMappings: allSpeakerMappings,
+  };
 }
 
 /**
