@@ -224,45 +224,55 @@ export function lightRefine(segments: TranscriptSegment[]): TranscriptSegment[] 
 // DEEP REFINEMENT - Comprehensive LLM-based transcript improvement
 // ============================================================================
 
-const DEEP_REFINEMENT_SYSTEM_PROMPT = `You are an expert transcription post-processor.
+const DEEP_REFINEMENT_SYSTEM_PROMPT = `You are an expert transcription post-processor specializing in Hebrew and English speech-to-text correction.
 
-Your job is to receive a raw transcript (produced by automatic speech-to-text) and produce a clean, accurate, and readable version that can be used for note-taking, meeting summaries, and archiving.
+Your job is to receive a raw transcript (produced by automatic speech-to-text) and produce a clean, accurate, and readable version. ASR systems make many errors that you MUST actively identify and fix.
 
-YOU ARE ALLOWED TO:
-- Fix transcription errors: typos, misheard words, broken sentences, repeated words that shouldn't repeat.
-- Correct speaker attribution: Some sentences may be attributed to the wrong speaker. Use semantic context to reassign lines to a more plausible speaker.
-- Replace generic speaker labels: If the transcript assigns labels like "Speaker 01" or "Speaker 1", you may replace them with the actual speaker's name if it appears during the meeting (e.g., when one person addresses another: "Thanks, Tom"). Only assign a real name if you're highly confident.
-- Merge speakers: Sometimes the system mistakenly splits the same speaker into multiple labels (e.g., "Speaker 1", "Speaker 01", "Speaker A"). You should consolidate them if the context strongly suggests they are the same person.
-- Delete hallucinated or incoherent segments: Some segments may be empty, gibberish, hallucinations (phrases repeated nonsensically), or background noise transcribed as words. These should be marked for soft deletion.
-- Move sentences between speakers: If a sentence clearly belongs to another speaker (based on preceding context), reassign it.
+ACTIVELY FIX THESE COMMON ASR ERRORS:
+1. Misheard Hebrew words (e.g., "העיקרון" should often be "האיחור", "שומך" should be "שלומך")
+2. Repeated segments that shouldn't repeat (e.g., "תודה רבה. תודה רבה. תודה רבה." → keep only one)
+3. Hallucinations - nonsensical phrases that don't belong (e.g., random Knesset speech, TV audio bleeding)
+4. Speaker attribution errors - use context to assign correct speaker
+5. Word boundary errors (e.g., "וויליאמס וויליאן" → "ויליאמסבורג")
+6. Filler words transcribed multiple times ("אהה" alone should be deleted)
+
+SPEAKER IDENTIFICATION:
+- If speakers address each other by name ("Thanks, Tom" / "תודה, יעל"), use those names
+- Consolidate Speaker variations (Speaker 00, Speaker 01, Speaker 1 might be same person)
+- Use speakerMappings to record name changes globally
+
+DELETION RULES - Mark as "deleted":
+- Empty or near-empty segments (just "אה..." or "...")
+- Clearly hallucinated content from background audio
+- Meaningless repetitions
+- Segments that are obviously transcription errors
 
 YOU MUST:
-- Preserve the original order of speech.
-- NOT add any content that wasn't said.
-- Maintain timestamps exactly as provided.
-- Mark each segment with its action: "keep" (unchanged), "modified" (text or speaker changed), or "deleted" (should be hidden).
+- Return ALL segments with originalIndex matching their position in input (0-indexed)
+- Mark action as "modified" if you changed ANYTHING (text OR speaker)
+- Mark action as "deleted" for segments to hide
+- Mark action as "keep" ONLY if segment is already perfect
+- Preserve the original order of speech
+- NOT add content that wasn't said
 
-IMPORTANT RULES:
-- If uncertain about a correction, prefer to keep the original.
-- Real names should only be assigned if high confidence. Otherwise keep the generic label.
-- Never delete content that might be meaningful.
-
-OUTPUT FORMAT:
-Return a valid JSON object with this structure:
+OUTPUT FORMAT (JSON):
 {
   "segments": [
     {
       "speaker": "Speaker Name or Label",
       "timestamp": "MM:SS",
-      "text": "Corrected sentence text",
+      "text": "Corrected text",
       "originalIndex": 0,
       "action": "keep" | "modified" | "deleted"
     }
   ],
   "speakerMappings": {
-    "Speaker 01": "Real Name (if identified)"
+    "Speaker 00": "תום",
+    "Speaker 01": "אורי"
   }
-}`;
+}
+
+BE AGGRESSIVE about fixing errors - ASR output is rarely perfect. Most segments should be "modified" or "deleted", not "keep".`;
 
 export interface DeepRefinementContext {
   meetingContext?: string;
@@ -337,6 +347,8 @@ export async function deepRefineTranscript(
   }
 
   try {
+    console.log(`[DeepRefine] Sending ${segments.length} segments to GPT-4o (${transcriptText.length} chars)`);
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -355,11 +367,22 @@ export async function deepRefineTranscript(
     });
 
     const content = response.choices[0]?.message?.content;
+    const finishReason = response.choices[0]?.finish_reason;
+
+    console.log(`[DeepRefine] GPT-4o finish_reason: ${finishReason}`);
+
     if (!content) {
       throw new Error("No response from GPT-4o");
     }
 
+    console.log(`[DeepRefine] GPT-4o response length: ${content.length} chars`);
+
+    if (finishReason === "length") {
+      console.warn(`[DeepRefine] Response was truncated! May have incomplete data.`);
+    }
+
     const result = JSON.parse(content) as DeepRefinementResult;
+    console.log(`[DeepRefine] Parsed ${result.segments?.length || 0} segments from response`);
 
     // Validate the result structure
     if (!Array.isArray(result.segments)) {

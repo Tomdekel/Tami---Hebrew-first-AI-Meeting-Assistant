@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { refineTranscript, lightRefine, type RefinementContext } from "@/lib/transcription/refinement";
+import {
+  refineTranscript,
+  lightRefine,
+  deepRefineTranscript,
+  applyDeepRefinements,
+  type RefinementContext
+} from "@/lib/transcription/refinement";
 import type { TranscriptSegment } from "@/lib/transcription/types";
 
 interface RouteParams {
@@ -64,12 +70,75 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     // Parse request body for refinement options
     const body = await request.json().catch(() => ({}));
-    const { mode = "full", participantNames, terminology } = body as {
-      mode?: "full" | "light";
+    const { mode = "deep", participantNames, terminology } = body as {
+      mode?: "deep" | "full" | "light";
       participantNames?: string[];
       terminology?: string[];
     };
 
+    // For deep mode, use the new comprehensive refinement
+    if (mode === "deep") {
+      // Prepare segments for deep refinement
+      const dbSegments = transcript.transcript_segments.map(
+        (seg: {
+          id: string;
+          speaker_id: string;
+          speaker_name?: string;
+          text: string;
+          start_time: number;
+          end_time: number;
+          segment_order: number;
+        }) => ({
+          speaker_name: seg.speaker_name || seg.speaker_id,
+          text: seg.text,
+          start_time: seg.start_time,
+          segment_order: seg.segment_order,
+        })
+      );
+
+      // Run deep refinement with GPT-4o
+      console.log(`[Refine] Starting deep refinement for transcript ${transcript.id} with ${dbSegments.length} segments`);
+
+      const refinementResult = await deepRefineTranscript(dbSegments, {
+        meetingContext: session.context || undefined,
+        language: (session.detected_language as "he" | "en") || "he",
+      });
+
+      // Log what GPT-4o returned
+      const actionCounts = refinementResult.segments.reduce((acc, seg) => {
+        acc[seg.action] = (acc[seg.action] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      console.log(`[Refine] GPT-4o returned ${refinementResult.segments.length} segments:`, actionCounts);
+      console.log(`[Refine] Speaker mappings:`, refinementResult.speakerMappings);
+
+      // Log first few modified segments for debugging
+      const modifiedSamples = refinementResult.segments
+        .filter(s => s.action === "modified")
+        .slice(0, 3);
+      if (modifiedSamples.length > 0) {
+        console.log(`[Refine] Sample modified segments:`, JSON.stringify(modifiedSamples, null, 2));
+      }
+
+      // Apply refinements to database
+      const { modifiedCount, deletedCount } = await applyDeepRefinements(
+        supabase,
+        transcript.id,
+        refinementResult
+      );
+
+      return NextResponse.json({
+        success: true,
+        modifiedCount,
+        deletedCount,
+        totalSegments: transcript.transcript_segments.length,
+        speakerMappings: refinementResult.speakerMappings,
+        actionCounts, // Include for debugging
+        mode,
+      });
+    }
+
+    // Legacy modes: light and full (conservative)
     const segments: TranscriptSegment[] = transcript.transcript_segments.map(
       (seg: {
         id: string;
@@ -99,7 +168,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         (s, i) => s.text !== refinedSegments[i].text
       ).length;
     } else {
-      // Full GPT-4o refinement
+      // Full GPT-4o-mini refinement (conservative, segment-by-segment)
       const context: RefinementContext = {
         meetingContext: session.context || undefined,
         language: (session.detected_language as "he" | "en") || "he",
@@ -173,7 +242,8 @@ export async function DELETE(request: Request, { params }: RouteParams) {
           transcript_segments (
             id,
             text,
-            original_text
+            original_text,
+            is_deleted
           )
         )
       `)
@@ -193,15 +263,19 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "No transcript found" }, { status: 400 });
     }
 
-    // Revert segments that have original_text
+    // Revert segments that have original_text and reset is_deleted
     let revertedCount = 0;
     for (const segment of transcript.transcript_segments) {
-      if (segment.original_text && segment.original_text !== segment.text) {
+      const needsRevert = segment.original_text && segment.original_text !== segment.text;
+      const needsUndelete = segment.is_deleted === true;
+
+      if (needsRevert || needsUndelete) {
         await supabase
           .from("transcript_segments")
           .update({
-            text: segment.original_text,
+            text: needsRevert ? segment.original_text : segment.text,
             original_text: null,
+            is_deleted: false,
           })
           .eq("id", segment.id);
         revertedCount++;
