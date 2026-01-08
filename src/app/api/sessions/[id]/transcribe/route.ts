@@ -52,14 +52,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     .eq("id", sessionId);
 
   try {
-    // Fetch the audio file
-    const audioResponse = await fetch(session.audio_url);
-    if (!audioResponse.ok) {
-      throw new Error("Failed to fetch audio file");
-    }
-
-    const audioBlob = await audioResponse.blob();
-
     // Get transcription service
     const transcriptionService = getTranscriptionService();
 
@@ -71,8 +63,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // For Hebrew: Use async job submission (Ivrit AI via RunPod)
     // For English: Use sync Whisper (fast enough for Vercel timeout)
     if (detectedLanguage === "he") {
-      // Submit async job to Ivrit AI
-      const { jobId } = await transcriptionService.submitAsyncJob(audioBlob, {
+      // Submit async job to Ivrit AI using URL (avoids 10MB body limit)
+      // The audio_url is already a public URL from Supabase Storage
+      const { jobId } = await transcriptionService.submitAsyncJob(session.audio_url, {
         numSpeakers: 10,
         prompt: session.context || undefined,
       });
@@ -95,6 +88,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // For English: Use sync Whisper (completes quickly)
+    // Need to fetch the audio blob for Whisper (OpenAI API requires file upload)
+    const audioResponse = await fetch(session.audio_url);
+    if (!audioResponse.ok) {
+      throw new Error("Failed to fetch audio file");
+    }
+    const audioBlob = await audioResponse.blob();
+
     const result = await transcriptionService.transcribe(audioBlob, {
       numSpeakers: 10,
       prompt: session.context || undefined,

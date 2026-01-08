@@ -115,14 +115,17 @@ export class TranscriptionService {
   /**
    * Submit an async transcription job (for Hebrew via Ivrit AI)
    * Returns immediately with a job ID that can be polled for status
+   *
+   * @param audioBlobOrUrl - Either a Blob (for small files <10MB) or a URL string (for large files)
+   * @param options - Transcription options
    */
   async submitAsyncJob(
-    audioBlob: Blob,
+    audioBlobOrUrl: Blob | string,
     options?: TranscriptionOptions
   ): Promise<{ jobId: string; provider: "ivrit" | "whisper" }> {
     // For now, only Ivrit supports async - Whisper is fast enough for sync
     const ivrit = this.getIvritProvider();
-    const { jobId } = await ivrit.submitJob(audioBlob, options);
+    const { jobId } = await ivrit.submitJob(audioBlobOrUrl, options);
     return { jobId, provider: "ivrit" };
   }
 

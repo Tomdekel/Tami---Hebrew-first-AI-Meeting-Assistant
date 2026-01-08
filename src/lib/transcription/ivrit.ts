@@ -100,12 +100,28 @@ export class IvritProvider implements TranscriptionProvider {
 
   /**
    * Submit a transcription job asynchronously (returns immediately with job ID)
+   * Supports either blob (for small files <10MB) or URL (for large files)
    */
   async submitJob(
-    audioBlob: Blob,
+    audioBlobOrUrl: Blob | string,
     options?: TranscriptionOptions
   ): Promise<{ jobId: string }> {
-    const base64Audio = await this.blobToBase64(audioBlob);
+    // Determine if input is URL or Blob
+    const isUrl = typeof audioBlobOrUrl === "string";
+
+    // Build transcribe_args based on input type
+    // For large files, use URL to avoid RunPod's 10MB body limit
+    const transcribe_args: Record<string, unknown> = {
+      language: "he",
+      diarize: true,
+      num_speakers: options?.numSpeakers || 10,
+    };
+
+    if (isUrl) {
+      transcribe_args.url = audioBlobOrUrl;
+    } else {
+      transcribe_args.blob = await this.blobToBase64(audioBlobOrUrl);
+    }
 
     // Ivrit AI RunPod endpoint expects this specific format
     // See: https://github.com/ivrit-ai/runpod-serverless
@@ -113,12 +129,7 @@ export class IvritProvider implements TranscriptionProvider {
       input: {
         engine: "faster-whisper",
         model: "ivrit-ai/whisper-large-v3-turbo-ct2",
-        transcribe_args: {
-          blob: base64Audio,
-          language: "he",
-          diarize: true,
-          num_speakers: options?.numSpeakers || 10,
-        },
+        transcribe_args,
       },
     };
 
