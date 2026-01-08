@@ -64,3 +64,29 @@ Required in `.env.local`:
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase
 - `OPENAI_API_KEY` - English ASR and summaries
 - `IVRIT_API_KEY`, `IVRIT_ENDPOINT_ID` - Hebrew ASR via RunPod
+
+## Development Workflow
+
+### Self-Testing Requirements
+**IMPORTANT**: Always self-test every feature and UI change before presenting to the user.
+
+1. After implementing any UI change:
+   - Use Chrome DevTools MCP or Playwright to navigate to the affected page
+   - Take snapshots to verify the UI renders correctly
+   - Test user interactions (clicks, form submissions, uploads)
+   - Check network requests for errors (especially 4xx/5xx responses)
+   - Verify console for JavaScript errors
+
+2. For file uploads:
+   - Test with actual files, not just code review
+   - Check both small files (<10MB) and large files (>10MB)
+   - Verify the complete flow: upload → processing → success/error
+
+3. For API changes:
+   - Test the endpoint directly or via UI
+   - Check both success and error paths
+   - Verify proper error messages are returned
+
+4. Deployment verification:
+   - After `vercel --prod`, test the production URL
+   - Don't assume local testing is sufficient
