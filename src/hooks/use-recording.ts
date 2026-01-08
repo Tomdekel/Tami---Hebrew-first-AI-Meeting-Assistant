@@ -139,17 +139,14 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     };
   }, [state, softWarningAt, strongWarningAt, maxDuration, onDurationWarning]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount only - empty dependency array ensures this only runs on unmount
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
       }
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
     };
-  }, [stream]);
+  }, []);
 
   const getMicrophoneStream = async (): Promise<MediaStream> => {
     return navigator.mediaDevices.getUserMedia({

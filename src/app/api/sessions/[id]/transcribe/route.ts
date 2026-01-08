@@ -63,10 +63,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Get transcription service
     const transcriptionService = getTranscriptionService();
 
-    // Detect language first (quick Whisper call on ~10 second sample)
-    const sampleSize = Math.min(audioBlob.size, 160000); // ~10 seconds at 128kbps
-    const audioSample = audioBlob.slice(0, sampleSize, audioBlob.type);
-    const detectedLanguage = await transcriptionService.detectLanguage(audioSample);
+    // Use session's detected_language if set, otherwise default to Hebrew
+    // (Skip Whisper-based detection to avoid timeout on Vercel)
+    // Hebrew-first app: default to Hebrew which uses async Ivrit AI
+    const detectedLanguage = session.detected_language || "he";
 
     // For Hebrew: Use async job submission (Ivrit AI via RunPod)
     // For English: Use sync Whisper (fast enough for Vercel timeout)

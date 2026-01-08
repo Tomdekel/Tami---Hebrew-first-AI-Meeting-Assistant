@@ -68,14 +68,15 @@ export default function NewMeetingPage() {
         // Clean up chunks
         await deleteAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current);
 
-        // Update session with context if provided
-        if (context) {
-          await fetch(`/api/sessions/${sessionIdRef.current}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ context }),
-          });
-        }
+        // Update session with audio URL (and context if provided)
+        await fetch(`/api/sessions/${sessionIdRef.current}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audio_url: audioResult.url,
+            ...(context ? { context } : {}),
+          }),
+        });
       } else {
         // Create a new session first
         const session = await createSession({
