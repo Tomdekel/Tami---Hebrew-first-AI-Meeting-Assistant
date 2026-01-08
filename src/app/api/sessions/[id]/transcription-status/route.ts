@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getTranscriptionService } from "@/lib/transcription";
 import { deepRefineTranscript, applyDeepRefinements } from "@/lib/transcription/refinement";
+import { generateAndSaveSummary } from "@/lib/ai";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -144,6 +145,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       } catch (refinementError) {
         // Log but don't fail - raw transcript is still available
         console.error("Deep refinement failed:", refinementError);
+      }
+
+      // Auto-generate summary
+      try {
+        await generateAndSaveSummary(supabase, sessionId, user.id, {
+          context: session.context || undefined,
+          language: result.language,
+          transcriptId: transcript.id,
+        });
+        console.log(`Auto-summary generated for session ${sessionId}`);
+      } catch (summaryError) {
+        // Log but don't fail - summary can be generated manually later
+        console.error("Auto-summary failed:", summaryError);
       }
 
       // Update session status to completed

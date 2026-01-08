@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 interface TranscriptSegment {
+  id?: string;
   speakerId: string;
   speakerName: string;
   text: string;
@@ -18,6 +19,12 @@ interface TranscriptViewerProps {
   currentTime?: number;
   onSegmentClick?: (segment: TranscriptSegment) => void;
   className?: string;
+  /** Enable segment selection mode for speaker reassignment */
+  editMode?: boolean;
+  /** Selected segment orders when in edit mode */
+  selectedSegments?: Set<number>;
+  /** Called when segment selection changes */
+  onSelectionChange?: (selected: Set<number>) => void;
 }
 
 // Timestamp interval in seconds (show timestamp markers every 30 seconds)
@@ -48,6 +55,9 @@ export function TranscriptViewer({
   currentTime = 0,
   onSegmentClick,
   className,
+  editMode = false,
+  selectedSegments = new Set(),
+  onSelectionChange,
 }: TranscriptViewerProps) {
   const [activeParagraphKey, setActiveParagraphKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -189,6 +199,39 @@ export function TranscriptViewer({
     return `${m}:${s.toString().padStart(2, "0")}`;
   }, []);
 
+  const toggleSegmentSelection = useCallback(
+    (segmentOrder: number) => {
+      if (!onSelectionChange) return;
+      const newSelection = new Set(selectedSegments);
+      if (newSelection.has(segmentOrder)) {
+        newSelection.delete(segmentOrder);
+      } else {
+        newSelection.add(segmentOrder);
+      }
+      onSelectionChange(newSelection);
+    },
+    [selectedSegments, onSelectionChange]
+  );
+
+  const toggleGroupSelection = useCallback(
+    (groupSegments: TranscriptSegment[]) => {
+      if (!onSelectionChange) return;
+      const groupOrders = groupSegments.map((s) => s.segmentOrder);
+      const allSelected = groupOrders.every((o) => selectedSegments.has(o));
+      const newSelection = new Set(selectedSegments);
+
+      if (allSelected) {
+        // Deselect all
+        groupOrders.forEach((o) => newSelection.delete(o));
+      } else {
+        // Select all
+        groupOrders.forEach((o) => newSelection.add(o));
+      }
+      onSelectionChange(newSelection);
+    },
+    [selectedSegments, onSelectionChange]
+  );
+
   return (
     <div
       ref={containerRef}
@@ -199,6 +242,10 @@ export function TranscriptViewer({
         const styleIndex = speakerStyleMap.get(group.speakerId) ?? 0;
         const style = SPEAKER_STYLES[styleIndex];
         const paragraphs = buildParagraphs(group.segments);
+        const groupAllSelected =
+          editMode && group.segments.every((s) => selectedSegments.has(s.segmentOrder));
+        const groupSomeSelected =
+          editMode && group.segments.some((s) => selectedSegments.has(s.segmentOrder));
 
         return (
           <div
@@ -206,49 +253,136 @@ export function TranscriptViewer({
             className={cn(
               "border-l-4 rounded-lg p-4 transition-colors",
               style.border,
-              style.bg
+              style.bg,
+              groupSomeSelected && "ring-2 ring-primary/30"
             )}
           >
-            {/* Speaker Name */}
-            <div className="font-medium text-sm mb-3 text-muted-foreground">
+            {/* Speaker Name with optional group selection */}
+            <div className="font-medium text-sm mb-3 text-muted-foreground flex items-center gap-2">
+              {editMode && (
+                <button
+                  type="button"
+                  onClick={() => toggleGroupSelection(group.segments)}
+                  className={cn(
+                    "w-4 h-4 border rounded flex items-center justify-center shrink-0",
+                    groupAllSelected
+                      ? "bg-primary border-primary text-primary-foreground"
+                      : groupSomeSelected
+                        ? "bg-primary/50 border-primary"
+                        : "border-muted-foreground/50"
+                  )}
+                >
+                  {(groupAllSelected || groupSomeSelected) && (
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      className="text-current"
+                    >
+                      <path
+                        d="M2 6l3 3 5-6"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              )}
               {group.speakerName}
             </div>
 
-            {/* Paragraphs */}
-            <div className="space-y-4">
-              {paragraphs.map((para, paraIndex) => {
-                const paraKey = `${group.speakerId}-${groupIndex}-${paraIndex}`;
-                const isActive = paraKey === activeParagraphKey;
-
-                return (
-                  <div
-                    key={paraKey}
-                    ref={(el) => {
-                      paragraphRefs.current.set(paraKey, el);
-                    }}
-                    onClick={() => handleParagraphClick(para)}
-                    className={cn(
-                      "cursor-pointer transition-all rounded-md p-2 -mx-2",
-                      "hover:bg-foreground/5",
-                      isActive && "bg-primary/10 ring-1 ring-primary/30"
-                    )}
-                  >
-                    {/* Timestamp */}
+            {/* Edit mode: Show individual segments */}
+            {editMode ? (
+              <div className="space-y-2">
+                {group.segments.map((seg) => {
+                  const isSelected = selectedSegments.has(seg.segmentOrder);
+                  return (
                     <div
+                      key={seg.segmentOrder}
+                      onClick={() => toggleSegmentSelection(seg.segmentOrder)}
                       className={cn(
-                        "text-xs text-muted-foreground font-mono mb-1",
-                        isActive && "text-primary font-medium"
+                        "cursor-pointer transition-all rounded-md p-2 -mx-2 flex items-start gap-2",
+                        "hover:bg-foreground/5",
+                        isSelected && "bg-primary/10 ring-1 ring-primary/30"
                       )}
                     >
-                      {formatTime(para.timestamp)}
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-4 h-4 mt-0.5 border rounded flex items-center justify-center shrink-0",
+                          isSelected
+                            ? "bg-primary border-primary text-primary-foreground"
+                            : "border-muted-foreground/50"
+                        )}
+                      >
+                        {isSelected && (
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                            className="text-current"
+                          >
+                            <path
+                              d="M2 6l3 3 5-6"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-muted-foreground font-mono mb-1">
+                          {formatTime(seg.startTime)}
+                        </div>
+                        <p className="leading-relaxed text-foreground">{seg.text}</p>
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Normal mode: Show merged paragraphs */
+              <div className="space-y-4">
+                {paragraphs.map((para, paraIndex) => {
+                  const paraKey = `${group.speakerId}-${groupIndex}-${paraIndex}`;
+                  const isActive = paraKey === activeParagraphKey;
 
-                    {/* Merged text */}
-                    <p className="leading-relaxed text-foreground">{para.text}</p>
-                  </div>
-                );
-              })}
-            </div>
+                  return (
+                    <div
+                      key={paraKey}
+                      ref={(el) => {
+                        paragraphRefs.current.set(paraKey, el);
+                      }}
+                      onClick={() => handleParagraphClick(para)}
+                      className={cn(
+                        "cursor-pointer transition-all rounded-md p-2 -mx-2",
+                        "hover:bg-foreground/5",
+                        isActive && "bg-primary/10 ring-1 ring-primary/30"
+                      )}
+                    >
+                      {/* Timestamp */}
+                      <div
+                        className={cn(
+                          "text-xs text-muted-foreground font-mono mb-1",
+                          isActive && "text-primary font-medium"
+                        )}
+                      >
+                        {formatTime(para.timestamp)}
+                      </div>
+
+                      {/* Merged text */}
+                      <p className="leading-relaxed text-foreground">{para.text}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

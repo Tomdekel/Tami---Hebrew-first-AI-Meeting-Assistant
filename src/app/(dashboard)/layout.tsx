@@ -1,6 +1,7 @@
 import { useTranslations } from "next-intl";
 import { LanguageToggle } from "@/components/language-toggle";
 import { UserMenu } from "@/components/user-menu";
+import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,9 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <main>{children}</main>
+
+      {/* Keyboard Shortcuts Dialog */}
+      <KeyboardShortcutsDialog />
     </div>
   );
 }

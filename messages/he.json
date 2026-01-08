@@ -6,7 +6,9 @@
     "entities": "ישויות",
     "search": "חיפוש",
     "settings": "הגדרות",
-    "newMeeting": "פגישה חדשה"
+    "newMeeting": "פגישה חדשה",
+    "previous": "הקודם",
+    "next": "הבא"
   },
   "meeting": {
     "transcript": "תמלול",
@@ -75,7 +77,31 @@
     "attachmentsDesc": "קבצים המצורפים לפגישה זו",
     "noAttachmentsYet": "אין עדיין קבצים מצורפים",
     "askAboutMeeting": "שאל שאלות על הפגישה",
-    "askQuestion": "שאל שאלה..."
+    "askQuestion": "שאל שאלה...",
+    "summaryGenerated": "הסיכום נוצר בהצלחה",
+    "speakersWillAppear": "דוברים יזוהו לאחר סיום התמלול",
+    "chatWillBeAvailable": "יהיה זמין לאחר סיום התמלול",
+    "summaryWillBeGenerated": "יופק אוטומטית לאחר סיום התמלול",
+    "aiGenerated": "נוצר ע״י AI",
+    "edited": "נערך",
+    "transcriptWillAppear": "התמלול יופיע כאן לאחר סיום העיבוד",
+    "processingTranscript": "מעבד את התמלול..."
+  },
+  "speakers": {
+    "renamed": "שם הדובר עודכן",
+    "renameFailed": "שינוי שם הדובר נכשל",
+    "merge": "מזג",
+    "mergeInto": "מזג לתוך...",
+    "merged": "הדוברים מוזגו",
+    "mergeFailed": "מיזוג הדוברים נכשל",
+    "editMode": "עריכת דוברים",
+    "exitEditMode": "סיום עריכה",
+    "selectSpeaker": "בחר דובר",
+    "newSpeaker": "דובר חדש...",
+    "assignTo": "שייך ל:",
+    "assign": "שייך",
+    "assigned": "הקטעים שויכו בהצלחה",
+    "assignFailed": "שיוך הקטעים נכשל"
   },
   "recording": {
     "start": "התחל הקלטה",
@@ -130,7 +156,9 @@
     "back": "חזרה",
     "important": "חשוב",
     "all": "הכל",
-    "clear": "נקה הכל"
+    "clear": "נקה הכל",
+    "expand": "הרחב",
+    "minimize": "מזער"
   },
   "auth": {
     "signIn": "התחברות",
@@ -218,5 +246,25 @@
     "results": "תוצאות",
     "inMeeting": "בפגישה",
     "filterByEntity": "סנן לפי סוג ישות"
+  },
+  "shortcuts": {
+    "title": "קיצורי מקלדת",
+    "hint": "לחץ ? בכל עת להצגת החלון הזה",
+    "navigation": "ניווט",
+    "newMeeting": "פגישה חדשה",
+    "goToMeetings": "עבור לפגישות",
+    "focusSearch": "מיקוד חיפוש",
+    "showShortcuts": "הצג קיצורים",
+    "audioPlayer": "נגן שמע",
+    "playPause": "נגן / השהה",
+    "rewind": "אחורה 10 שניות",
+    "forward": "קדימה 10 שניות",
+    "rewind5": "אחורה 5 שניות",
+    "forward5": "קדימה 5 שניות",
+    "panels": "פאנלים",
+    "toggleSummary": "הצג/הסתר סיכום",
+    "toggleSpeakers": "הצג/הסתר דוברים",
+    "toggleEntities": "הצג/הסתר ישויות",
+    "toggleChat": "הצג/הסתר צ׳אט"
   }
 }

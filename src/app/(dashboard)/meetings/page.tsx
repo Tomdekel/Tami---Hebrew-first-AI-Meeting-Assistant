@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Plus, Loader2, Mic, Clock, CheckCircle2, AlertCircle, XCircle, Sparkles, Tag as TagIcon, X } from "lucide-react";
+import { Plus, Loader2, Mic, Clock, CheckCircle2, AlertCircle, XCircle, Sparkles, Tag as TagIcon, X, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useSessions } from "@/hooks/use-session";
 import type { SessionStatus, Tag } from "@/lib/types/database";
 
@@ -42,9 +43,20 @@ export default function MeetingsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagId, setSelectedTagId] = useState<string | undefined>();
   const [tagsLoading, setTagsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const { sessions, isLoading, error, hasMore, loadMore } = useSessions({
     tagId: selectedTagId,
+    search: debouncedSearch || undefined,
   });
 
   // Fetch tags on mount
@@ -68,7 +80,7 @@ export default function MeetingsPage() {
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold">{t("nav.meetings")}</h1>
           <p className="text-muted-foreground mt-1">
@@ -81,6 +93,26 @@ export default function MeetingsPage() {
             {t("nav.newMeeting")}
           </Link>
         </Button>
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          type="search"
+          placeholder={t("search.placeholder")}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="ps-9"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* Tag Filter */}

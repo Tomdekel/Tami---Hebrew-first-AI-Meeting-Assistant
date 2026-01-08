@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get("offset") || "0");
     const status = searchParams.get("status");
     const tagId = searchParams.get("tagId");
+    const search = searchParams.get("search");
 
     // If filtering by tag, we need to join with session_tags
     if (tagId) {
@@ -59,6 +60,10 @@ export async function GET(request: NextRequest) {
         query = query.eq("status", status);
       }
 
+      if (search) {
+        query = query.or(`title.ilike.%${search}%,context.ilike.%${search}%`);
+      }
+
       const { data, error, count } = await query;
 
       if (error) {
@@ -83,6 +88,10 @@ export async function GET(request: NextRequest) {
 
     if (status) {
       query = query.eq("status", status);
+    }
+
+    if (search) {
+      query = query.or(`title.ilike.%${search}%,context.ilike.%${search}%`);
     }
 
     const { data, error, count } = await query;

@@ -247,18 +247,33 @@ ACTIVELY FIX THESE COMMON ASR ERRORS:
    - "בעל" when it should be "בא ל" (coming to)
    - "חבר בעל" → "חבר בא ל" (friend coming to)
 
+HALLUCINATION DETECTION - CRITICAL:
+ASR often hallucinates during silence, background noise, or recording warmup. Mark these as "deleted":
+- Formal speech patterns that don't match casual conversation tone (e.g., "אדוני היושב-ראש", "חברי חברי הכנסת")
+- TV/radio audio that bled into recording (news anchors, advertisements)
+- Segments at the START of recording (first 60-90 seconds) that seem disconnected from the main conversation
+- Content that doesn't match the meeting context at all
+- Repeated formal phrases like "תודה רבה" appearing multiple times alone
+
 SPEAKER IDENTIFICATION - CRITICAL:
+- Most meetings have only 2-3 speakers. Map ALL speaker variations to these few people.
 - If speakers address each other by name ("Thanks, Tom" / "תודה, יעל"), use those names
-- Consolidate ALL Speaker variations (Speaker 00, Speaker 01, Speaker 02, Speaker 1, Speaker 2 are likely the same few people)
-- In a typical conversation there are 2-4 speakers, NOT more - map all variations to real names
-- Use speakerMappings to record ALL name changes globally (include Speaker 02, Speaker 03, etc.)
-- If uncertain which speaker is which, use conversational context (who responds to whom)
+- Consolidate ALL Speaker variations (Speaker 00, Speaker 01, Speaker 02, Speaker 1, Speaker 2, Speaker 03)
+- Each speaker should have ONE consistent name throughout - don't let the same person appear with different labels
+- Use speakerMappings to record ALL name changes globally (MUST include Speaker 00, 01, 02, 03 etc.)
+- Use conversational context: who greets whom, who asks vs answers questions
+- If one person speaks much more (like an interviewer), they're likely one consistent speaker
+
+SPEAKER CONSISTENCY CHECK:
+Before finalizing, verify: does any speaker_name appear with inconsistent attribution?
+E.g., if "תום" appears as both interviewer and interviewee, something is wrong - fix it.
 
 DELETION RULES - Mark as "deleted":
 - Empty or near-empty segments (just "אה..." or "...")
 - Clearly hallucinated content from background audio
 - Meaningless repetitions
 - Segments that are obviously transcription errors
+- Early recording warmup hallucinations (first ~60s if disconnected from main content)
 
 YOU MUST:
 - Return ALL segments with originalIndex matching their position in input (0-indexed)

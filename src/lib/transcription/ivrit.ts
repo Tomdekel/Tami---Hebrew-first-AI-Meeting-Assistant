@@ -72,7 +72,7 @@ export class IvritProvider implements TranscriptionProvider {
           blob: base64Audio,
           language: "he",
           diarize: true,
-          num_speakers: options?.numSpeakers || 10,
+          num_speakers: options?.numSpeakers || 4,
         },
       },
     };

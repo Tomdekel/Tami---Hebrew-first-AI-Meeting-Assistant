@@ -3,17 +3,24 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Upload, Loader2, FileAudio, X } from "lucide-react";
+import { ArrowLeft, Upload, Loader2, FileAudio, X, Clock } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
 import { Recorder } from "@/components/recording";
 import { toast } from "sonner";
 import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio";
 import { createSession, startTranscription } from "@/hooks/use-session";
 import { createClient } from "@/lib/supabase/client";
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
 export default function NewMeetingPage() {
   const t = useTranslations();
@@ -21,6 +28,8 @@ export default function NewMeetingPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileDuration, setFileDuration] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [meetingContext, setMeetingContext] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -152,6 +161,18 @@ export default function NewMeetingPage() {
         return;
       }
       setSelectedFile(file);
+      setFileDuration(null);
+
+      // Extract duration from audio/video file
+      const mediaElement = document.createElement(file.type.startsWith("video/") ? "video" : "audio");
+      mediaElement.preload = "metadata";
+      mediaElement.onloadedmetadata = () => {
+        if (mediaElement.duration && isFinite(mediaElement.duration)) {
+          setFileDuration(mediaElement.duration);
+        }
+        URL.revokeObjectURL(mediaElement.src);
+      };
+      mediaElement.src = URL.createObjectURL(file);
     }
   };
 
@@ -161,6 +182,16 @@ export default function NewMeetingPage() {
     if (!selectedFile) return;
 
     setIsUploading(true);
+    setUploadProgress(0);
+
+    // Simulate progress while uploading (Supabase doesn't expose real progress)
+    const progressInterval = setInterval(() => {
+      setUploadProgress((prev) => {
+        if (prev >= 90) return prev; // Cap at 90% until done
+        return prev + Math.random() * 15;
+      });
+    }, 500);
+
     try {
       // Get current user
       const supabase = createClient();
@@ -169,10 +200,12 @@ export default function NewMeetingPage() {
       if (!user) {
         toast.error(t("auth.signIn"));
         setIsUploading(false);
+        clearInterval(progressInterval);
         return;
       }
 
       // Validate audio for speech content
+      setUploadProgress(10);
       toast.info(t("upload.validating"));
       const validation = await validateAudioForSpeech(selectedFile);
 
@@ -184,9 +217,11 @@ export default function NewMeetingPage() {
         console.log("Validation details:", formatValidationDetails(validation.details));
         setIsUploading(false);
         setSelectedFile(null);
+        clearInterval(progressInterval);
         return;
       }
 
+      setUploadProgress(20);
       toast.info(t("upload.uploading"));
 
       // Create session with context
@@ -210,6 +245,8 @@ export default function NewMeetingPage() {
         body: JSON.stringify({ audio_url: audioResult.url }),
       });
 
+      setUploadProgress(100);
+      clearInterval(progressInterval);
       toast.success(t("upload.success"));
 
       // Start transcription
@@ -223,6 +260,7 @@ export default function NewMeetingPage() {
         description: error instanceof Error ? error.message : "Unknown error",
       });
       setSelectedFile(null);
+      clearInterval(progressInterval);
     } finally {
       setIsUploading(false);
     }
@@ -230,6 +268,8 @@ export default function NewMeetingPage() {
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
+    setFileDuration(null);
+    setUploadProgress(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -325,13 +365,17 @@ export default function NewMeetingPage() {
                 {isUploading ? (
                   <div className="flex flex-col items-center justify-center py-8 gap-4">
                     <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                    <div className="text-center">
+                    <div className="text-center w-full max-w-xs">
                       <p className="font-medium">{t("upload.uploading")}</p>
                       {selectedFile && (
                         <p className="text-sm text-muted-foreground mt-1">
                           {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
                         </p>
                       )}
+                      <Progress value={uploadProgress} className="mt-3" />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {uploadProgress > 0 ? `${uploadProgress}%` : t("upload.processing")}
+                      </p>
                     </div>
                   </div>
                 ) : selectedFile ? (
@@ -341,9 +385,18 @@ export default function NewMeetingPage() {
                       <FileAudio className="h-10 w-10 text-primary flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{selectedFile.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                          <span>{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</span>
+                          {fileDuration && (
+                            <>
+                              <span>•</span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatDuration(fileDuration)}
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <Button
                         variant="ghost"

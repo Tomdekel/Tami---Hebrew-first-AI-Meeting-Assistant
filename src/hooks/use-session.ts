@@ -95,6 +95,7 @@ interface UseSessionsOptions {
   limit?: number;
   status?: string;
   tagId?: string;
+  search?: string;
 }
 
 interface UseSessionsReturn {
@@ -108,7 +109,7 @@ interface UseSessionsReturn {
 }
 
 export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn {
-  const { limit = 20, status, tagId } = options;
+  const { limit = 20, status, tagId, search } = options;
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [total, setTotal] = useState(0);
@@ -131,6 +132,10 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn
 
         if (tagId) {
           params.set("tagId", tagId);
+        }
+
+        if (search) {
+          params.set("search", search);
         }
 
         const response = await fetch(`/api/sessions?${params}`);
@@ -157,7 +162,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn
         setIsLoading(false);
       }
     },
-    [limit, status, tagId, offset]
+    [limit, status, tagId, search, offset]
   );
 
   // Initial fetch
@@ -165,7 +170,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsReturn
     setIsLoading(true);
     setOffset(0);
     fetchSessions(true);
-  }, [limit, status, tagId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [limit, status, tagId, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMore = useCallback(async () => {
     if (sessions.length >= total) return;

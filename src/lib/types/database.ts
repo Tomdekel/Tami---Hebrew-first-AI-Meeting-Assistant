@@ -50,6 +50,7 @@ export interface Summary {
   key_points: string[];
   decisions?: Decision[];
   created_at: string;
+  edited_at?: string | null;
   action_items?: ActionItem[];
 }
 

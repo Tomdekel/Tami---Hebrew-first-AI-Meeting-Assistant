@@ -75,7 +75,14 @@
     "attachmentsDesc": "Files attached to this meeting",
     "noAttachmentsYet": "No attachments yet",
     "askAboutMeeting": "Ask questions about this meeting",
-    "askQuestion": "Ask a question..."
+    "askQuestion": "Ask a question...",
+    "speakersWillAppear": "Speakers will be identified after transcription",
+    "chatWillBeAvailable": "Will be available after transcription",
+    "summaryWillBeGenerated": "Will be generated after transcription",
+    "aiGenerated": "AI Generated",
+    "edited": "Edited",
+    "transcriptWillAppear": "Transcript will appear after processing",
+    "processingTranscript": "Processing transcript..."
   },
   "recording": {
     "start": "Start Recording",
@@ -130,7 +137,9 @@
     "back": "Back",
     "important": "Important",
     "all": "All",
-    "clear": "Clear all"
+    "clear": "Clear all",
+    "expand": "Expand",
+    "minimize": "Minimize"
   },
   "auth": {
     "signIn": "Sign In",
@@ -218,5 +227,25 @@
     "results": "results",
     "inMeeting": "in meeting",
     "filterByEntity": "Filter by entity type"
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "hint": "Press ? anytime to show this dialog",
+    "navigation": "Navigation",
+    "newMeeting": "New meeting",
+    "goToMeetings": "Go to meetings",
+    "focusSearch": "Focus search",
+    "showShortcuts": "Show shortcuts",
+    "audioPlayer": "Audio Player",
+    "playPause": "Play / Pause",
+    "rewind": "Rewind 10 seconds",
+    "forward": "Forward 10 seconds",
+    "rewind5": "Rewind 5 seconds",
+    "forward5": "Forward 5 seconds",
+    "panels": "Panels",
+    "toggleSummary": "Toggle summary",
+    "toggleSpeakers": "Toggle speakers",
+    "toggleEntities": "Toggle entities",
+    "toggleChat": "Toggle chat"
   }
 }
