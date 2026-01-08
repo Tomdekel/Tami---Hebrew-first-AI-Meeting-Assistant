@@ -638,6 +638,7 @@ export default function SessionDetailPage({ params }: PageProps) {
     startTime: seg.start_time,
     endTime: seg.end_time,
     segmentOrder: seg.segment_order,
+    isDeleted: seg.is_deleted,
   })) || [];
 
   const availableTagsToAdd = allTags.filter(
@@ -742,11 +743,12 @@ export default function SessionDetailPage({ params }: PageProps) {
                   : "secondary"
             }
           >
-            {session.status === "processing" && <Loader2 className="h-3 w-3 me-1 animate-spin" />}
+            {(session.status === "processing" || session.status === "refining") && <Loader2 className="h-3 w-3 me-1 animate-spin" />}
             {session.status === "completed" && <CheckCircle2 className="h-3 w-3 me-1" />}
             {session.status === "completed" && t("meeting.completed")}
             {session.status === "failed" && t("meeting.failed")}
             {session.status === "processing" && t("meeting.processing")}
+            {session.status === "refining" && t("meeting.refining")}
             {session.status === "pending" && t("meeting.pending")}
           </Badge>
 
@@ -899,6 +901,20 @@ export default function SessionDetailPage({ params }: PageProps) {
               <h3 className="font-medium">{t("meeting.transcribing")}</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 {t("meeting.transcribingDesc")}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {session.status === "refining" && (
+        <Card className="mb-6">
+          <CardContent className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <Sparkles className="h-12 w-12 animate-pulse text-primary mx-auto mb-4" />
+              <h3 className="font-medium">{t("meeting.refining")}</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                {t("meeting.refiningDesc")}
               </p>
             </div>
           </CardContent>

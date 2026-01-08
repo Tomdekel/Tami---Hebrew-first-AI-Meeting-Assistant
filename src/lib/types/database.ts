@@ -1,4 +1,4 @@
-export type SessionStatus = "pending" | "recording" | "processing" | "completed" | "failed";
+export type SessionStatus = "pending" | "recording" | "processing" | "refining" | "completed" | "failed";
 export type Language = "he" | "en" | "auto";
 export type EntityType = "person" | "organization" | "project" | "topic" | "location" | "date" | "product" | "technology" | "other";
 export type TagSource = "manual" | "auto:person" | "auto:organization" | "auto:project" | "auto:topic";
@@ -35,6 +35,7 @@ export interface TranscriptSegment {
   start_time: number;
   end_time: number;
   segment_order: number;
+  is_deleted?: boolean;
 }
 
 export interface Decision {

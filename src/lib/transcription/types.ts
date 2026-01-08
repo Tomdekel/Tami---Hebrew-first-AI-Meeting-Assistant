@@ -26,3 +26,17 @@ export interface TranscriptionOptions {
 }
 
 export type SupportedLanguage = "he" | "en" | "auto";
+
+// Deep refinement types
+export interface DeepRefinedSegment {
+  speaker: string;
+  timestamp: string; // MM:SS format
+  text: string;
+  originalIndex: number;
+  action: "keep" | "modified" | "deleted";
+}
+
+export interface DeepRefinementResult {
+  segments: DeepRefinedSegment[];
+  speakerMappings: Record<string, string>; // old name → new name
+}

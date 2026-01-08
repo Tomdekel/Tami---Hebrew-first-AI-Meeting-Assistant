@@ -44,6 +44,8 @@
     "startTranscription": "Start Transcription",
     "transcribing": "Transcribing...",
     "transcribingDesc": "This may take a few minutes depending on the audio length",
+    "refining": "Refining transcript...",
+    "refiningDesc": "AI is improving accuracy and speaker attribution",
     "transcriptionFailed": "Transcription failed",
     "transcriptionError": "An error occurred during transcription",
     "speakers": "Speakers",

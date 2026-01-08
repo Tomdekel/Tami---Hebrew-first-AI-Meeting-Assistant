@@ -13,7 +13,8 @@
  */
 
 import OpenAI from "openai";
-import type { TranscriptSegment } from "./types";
+import type { TranscriptSegment, DeepRefinedSegment, DeepRefinementResult } from "./types";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 export interface RefinementContext {
   meetingContext?: string; // e.g., "Product meeting at tech company"
@@ -217,4 +218,238 @@ export function lightRefine(segments: TranscriptSegment[]): TranscriptSegment[] 
     ...segment,
     text: applyRuleBasedCorrections(segment.text),
   }));
+}
+
+// ============================================================================
+// DEEP REFINEMENT - Comprehensive LLM-based transcript improvement
+// ============================================================================
+
+const DEEP_REFINEMENT_SYSTEM_PROMPT = `You are an expert transcription post-processor.
+
+Your job is to receive a raw transcript (produced by automatic speech-to-text) and produce a clean, accurate, and readable version that can be used for note-taking, meeting summaries, and archiving.
+
+YOU ARE ALLOWED TO:
+- Fix transcription errors: typos, misheard words, broken sentences, repeated words that shouldn't repeat.
+- Correct speaker attribution: Some sentences may be attributed to the wrong speaker. Use semantic context to reassign lines to a more plausible speaker.
+- Replace generic speaker labels: If the transcript assigns labels like "Speaker 01" or "Speaker 1", you may replace them with the actual speaker's name if it appears during the meeting (e.g., when one person addresses another: "Thanks, Tom"). Only assign a real name if you're highly confident.
+- Merge speakers: Sometimes the system mistakenly splits the same speaker into multiple labels (e.g., "Speaker 1", "Speaker 01", "Speaker A"). You should consolidate them if the context strongly suggests they are the same person.
+- Delete hallucinated or incoherent segments: Some segments may be empty, gibberish, hallucinations (phrases repeated nonsensically), or background noise transcribed as words. These should be marked for soft deletion.
+- Move sentences between speakers: If a sentence clearly belongs to another speaker (based on preceding context), reassign it.
+
+YOU MUST:
+- Preserve the original order of speech.
+- NOT add any content that wasn't said.
+- Maintain timestamps exactly as provided.
+- Mark each segment with its action: "keep" (unchanged), "modified" (text or speaker changed), or "deleted" (should be hidden).
+
+IMPORTANT RULES:
+- If uncertain about a correction, prefer to keep the original.
+- Real names should only be assigned if high confidence. Otherwise keep the generic label.
+- Never delete content that might be meaningful.
+
+OUTPUT FORMAT:
+Return a valid JSON object with this structure:
+{
+  "segments": [
+    {
+      "speaker": "Speaker Name or Label",
+      "timestamp": "MM:SS",
+      "text": "Corrected sentence text",
+      "originalIndex": 0,
+      "action": "keep" | "modified" | "deleted"
+    }
+  ],
+  "speakerMappings": {
+    "Speaker 01": "Real Name (if identified)"
+  }
+}`;
+
+export interface DeepRefinementContext {
+  meetingContext?: string;
+  language?: "he" | "en";
+}
+
+interface DBSegment {
+  speaker_name: string | null;
+  text: string;
+  start_time: number;
+  segment_order: number;
+}
+
+/**
+ * Format seconds to MM:SS string
+ */
+function formatTimestamp(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Deep refinement: Send entire transcript to GPT-4o for comprehensive improvement
+ *
+ * This is more aggressive than the conservative segment-by-segment approach.
+ * It can:
+ * - Fix transcription errors
+ * - Correct speaker attribution
+ * - Merge speakers
+ * - Delete hallucinated segments
+ * - Replace generic labels with real names
+ */
+export async function deepRefineTranscript(
+  segments: DBSegment[],
+  context: DeepRefinementContext = {}
+): Promise<DeepRefinementResult> {
+  const openaiKey = process.env.OPENAI_API_KEY;
+
+  if (!openaiKey) {
+    console.warn("OpenAI API key not set, skipping deep refinement");
+    return {
+      segments: segments.map((s, i) => ({
+        speaker: s.speaker_name || "Speaker",
+        timestamp: formatTimestamp(s.start_time),
+        text: s.text,
+        originalIndex: i,
+        action: "keep" as const,
+      })),
+      speakerMappings: {},
+    };
+  }
+
+  const openai = new OpenAI({ apiKey: openaiKey });
+
+  // Build the transcript text for the model
+  const transcriptText = segments.map((seg, idx) => {
+    const timestamp = formatTimestamp(seg.start_time);
+    const speaker = seg.speaker_name || `Speaker ${idx % 10}`;
+    return `[${idx}] ${timestamp} | ${speaker}: ${seg.text}`;
+  }).join("\n");
+
+  // Build context message
+  let userMessage = `Here is a raw transcript to refine:\n\n${transcriptText}`;
+
+  if (context.meetingContext) {
+    userMessage = `Meeting context: ${context.meetingContext}\n\n${userMessage}`;
+  }
+
+  if (context.language) {
+    userMessage += `\n\nLanguage: ${context.language === "he" ? "Hebrew" : "English"}`;
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: DEEP_REFINEMENT_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: userMessage,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.3,
+      max_tokens: 16000, // Allow for large transcripts
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("No response from GPT-4o");
+    }
+
+    const result = JSON.parse(content) as DeepRefinementResult;
+
+    // Validate the result structure
+    if (!Array.isArray(result.segments)) {
+      throw new Error("Invalid response: segments is not an array");
+    }
+
+    // Ensure all segments have required fields
+    const validatedSegments: DeepRefinedSegment[] = result.segments.map((seg, fallbackIdx) => ({
+      speaker: seg.speaker || "Speaker",
+      timestamp: seg.timestamp || "00:00",
+      text: seg.text || "",
+      originalIndex: typeof seg.originalIndex === "number" ? seg.originalIndex : fallbackIdx,
+      action: seg.action || "keep",
+    }));
+
+    return {
+      segments: validatedSegments,
+      speakerMappings: result.speakerMappings || {},
+    };
+  } catch (error) {
+    console.error("Deep refinement failed:", error);
+    // Return original segments on failure
+    return {
+      segments: segments.map((s, i) => ({
+        speaker: s.speaker_name || "Speaker",
+        timestamp: formatTimestamp(s.start_time),
+        text: s.text,
+        originalIndex: i,
+        action: "keep" as const,
+      })),
+      speakerMappings: {},
+    };
+  }
+}
+
+/**
+ * Apply deep refinement results to database segments
+ */
+export async function applyDeepRefinements(
+  supabase: SupabaseClient,
+  transcriptId: string,
+  result: DeepRefinementResult
+): Promise<{ modifiedCount: number; deletedCount: number }> {
+  let modifiedCount = 0;
+  let deletedCount = 0;
+
+  // Process each segment
+  for (const segment of result.segments) {
+    if (segment.action === "modified") {
+      const { error } = await supabase
+        .from("transcript_segments")
+        .update({
+          text: segment.text,
+          speaker_name: segment.speaker,
+        })
+        .eq("transcript_id", transcriptId)
+        .eq("segment_order", segment.originalIndex);
+
+      if (!error) {
+        modifiedCount++;
+      } else {
+        console.error(`Failed to update segment ${segment.originalIndex}:`, error);
+      }
+    }
+
+    if (segment.action === "deleted") {
+      const { error } = await supabase
+        .from("transcript_segments")
+        .update({ is_deleted: true })
+        .eq("transcript_id", transcriptId)
+        .eq("segment_order", segment.originalIndex);
+
+      if (!error) {
+        deletedCount++;
+      } else {
+        console.error(`Failed to delete segment ${segment.originalIndex}:`, error);
+      }
+    }
+  }
+
+  // Apply global speaker name mappings
+  for (const [oldName, newName] of Object.entries(result.speakerMappings)) {
+    if (oldName && newName && oldName !== newName) {
+      await supabase
+        .from("transcript_segments")
+        .update({ speaker_name: newName })
+        .eq("transcript_id", transcriptId)
+        .eq("speaker_name", oldName);
+    }
+  }
+
+  return { modifiedCount, deletedCount };
 }

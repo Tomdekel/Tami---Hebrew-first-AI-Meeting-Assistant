@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getTranscriptionService } from "@/lib/transcription";
+import { deepRefineTranscript, applyDeepRefinements } from "@/lib/transcription/refinement";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -32,11 +33,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // If not processing, return current status
-  if (session.status !== "processing") {
+  // If not processing or refining, return current status
+  if (session.status !== "processing" && session.status !== "refining") {
     return NextResponse.json({
       status: session.status,
       completed: session.status === "completed",
+    });
+  }
+
+  // If refining, return that status
+  if (session.status === "refining") {
+    return NextResponse.json({
+      status: "refining",
+      completed: false,
+      message: "AI is improving transcript accuracy",
     });
   }
 
@@ -74,7 +84,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         throw new Error(`Failed to save transcript: ${transcriptError.message}`);
       }
 
-      // Save transcript segments
+      // Save transcript segments (raw from ASR)
       if (result.segments.length > 0) {
         const segments = result.segments.map((seg, index) => ({
           transcript_id: transcript.id,
@@ -95,14 +105,51 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
       }
 
-      // Update session status to completed
+      // Update status to "refining" - AI is improving accuracy
       await supabase
         .from("sessions")
         .update({
-          status: "completed",
+          status: "refining",
           duration_seconds: result.duration,
           transcription_job_id: null, // Clear job ID
         })
+        .eq("id", sessionId);
+
+      // Run deep refinement in the background
+      // We return immediately with "refining" status, client will poll
+      try {
+        // Fetch segments for refinement
+        const { data: dbSegments } = await supabase
+          .from("transcript_segments")
+          .select("speaker_name, text, start_time, segment_order")
+          .eq("transcript_id", transcript.id)
+          .order("segment_order");
+
+        if (dbSegments && dbSegments.length > 0) {
+          // Run deep refinement
+          const refinementResult = await deepRefineTranscript(dbSegments, {
+            meetingContext: session.context || undefined,
+            language: result.language === "he" ? "he" : "en",
+          });
+
+          // Apply refinements to database
+          const { modifiedCount, deletedCount } = await applyDeepRefinements(
+            supabase,
+            transcript.id,
+            refinementResult
+          );
+
+          console.log(`Deep refinement: ${modifiedCount} modified, ${deletedCount} deleted`);
+        }
+      } catch (refinementError) {
+        // Log but don't fail - raw transcript is still available
+        console.error("Deep refinement failed:", refinementError);
+      }
+
+      // Update session status to completed
+      await supabase
+        .from("sessions")
+        .update({ status: "completed" })
         .eq("id", sessionId);
 
       return NextResponse.json({

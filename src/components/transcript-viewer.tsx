@@ -10,6 +10,7 @@ interface TranscriptSegment {
   startTime: number;
   endTime: number;
   segmentOrder: number;
+  isDeleted?: boolean;
 }
 
 interface TranscriptViewerProps {
@@ -43,7 +44,7 @@ interface TimestampedParagraph {
 }
 
 export function TranscriptViewer({
-  segments,
+  segments: rawSegments,
   currentTime = 0,
   onSegmentClick,
   className,
@@ -51,6 +52,12 @@ export function TranscriptViewer({
   const [activeParagraphKey, setActiveParagraphKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const paragraphRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
+  // Filter out soft-deleted segments (from deep refinement)
+  const segments = useMemo(
+    () => rawSegments.filter((s) => !s.isDeleted),
+    [rawSegments]
+  );
 
   // Detect RTL content (Hebrew)
   const isRTL = useMemo(() => {

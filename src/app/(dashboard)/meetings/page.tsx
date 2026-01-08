@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Plus, Loader2, Mic, Clock, CheckCircle2, AlertCircle, XCircle, Tag as TagIcon, X } from "lucide-react";
+import { Plus, Loader2, Mic, Clock, CheckCircle2, AlertCircle, XCircle, Sparkles, Tag as TagIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ const statusIcons: Record<SessionStatus, { icon: React.ReactNode; variant: "defa
   pending: { icon: <Clock className="h-3 w-3" />, variant: "secondary" },
   recording: { icon: <Mic className="h-3 w-3 animate-pulse text-red-500" />, variant: "destructive" },
   processing: { icon: <Loader2 className="h-3 w-3 animate-spin" />, variant: "default" },
+  refining: { icon: <Sparkles className="h-3 w-3 animate-pulse" />, variant: "default" },
   completed: { icon: <CheckCircle2 className="h-3 w-3" />, variant: "outline" },
   failed: { icon: <XCircle className="h-3 w-3" />, variant: "destructive" },
 };

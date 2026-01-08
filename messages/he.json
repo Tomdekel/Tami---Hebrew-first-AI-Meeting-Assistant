@@ -44,6 +44,8 @@
     "startTranscription": "התחל תמלול",
     "transcribing": "מתמלל...",
     "transcribingDesc": "התהליך עשוי לקחת מספר דקות בהתאם לאורך השמע",
+    "refining": "משפר תמלול...",
+    "refiningDesc": "הבינה המלאכותית משפרת את הדיוק ושיוך הדוברים",
     "transcriptionFailed": "התמלול נכשל",
     "transcriptionError": "אירעה שגיאה במהלך התמלול",
     "speakers": "דוברים",

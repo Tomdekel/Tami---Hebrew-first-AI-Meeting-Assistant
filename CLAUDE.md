@@ -90,3 +90,22 @@ Required in `.env.local`:
 4. Deployment verification:
    - After `vercel --prod`, test the production URL
    - Don't assume local testing is sufficient
+
+## Verification Rules
+
+### The Reality Check (ALL must be YES):
+- Did I run the dev server?
+- Did I test the exact feature in browser?
+- Did I see it work with my own observation?
+- Would I bet $100 this works?
+
+### Banned Phrases:
+- "This should work now"
+- "I've fixed the issue"
+- "The logic is correct so..."
+
+### Before Marking Done:
+1. npm run typecheck passes
+2. Feature verified at localhost:3000
+3. No console errors
+4. git push succeeds
