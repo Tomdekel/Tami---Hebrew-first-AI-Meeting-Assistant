@@ -6,7 +6,8 @@
     "entities": "Entities",
     "search": "Search",
     "settings": "Settings",
-    "newMeeting": "New Meeting"
+    "newMeeting": "New Meeting",
+    "myMeetings": "My Meetings"
   },
   "meeting": {
     "transcript": "Transcript",

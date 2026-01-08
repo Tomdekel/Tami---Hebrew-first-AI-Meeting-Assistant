@@ -3,7 +3,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LanguageToggle } from "@/components/language-toggle";
-import { Mic, Upload, MessageSquare, FileText } from "lucide-react";
+import { Mic, Upload, MessageSquare, FileText, Calendar } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export default function Home() {
   const t = useTranslations();
@@ -46,6 +47,15 @@ export default function Home() {
               <Link href="/meetings/new?tab=upload">
                 <Upload className="h-5 w-5" />
                 {t("upload.title")}
+              </Link>
+            </Button>
+            <Button size="lg" variant="secondary" className="gap-2 bg-orange-500 hover:bg-orange-600 text-white" asChild>
+              <Link href="/meetings">
+                <Calendar className="h-5 w-5" />
+                {t("nav.myMeetings")}
+                <Badge variant="outline" className="ms-1 text-[10px] px-1.5 py-0 bg-white/20 text-white border-white/30">
+                  NEW
+                </Badge>
               </Link>
             </Button>
           </div>

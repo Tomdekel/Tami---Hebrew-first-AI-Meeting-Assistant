@@ -6,6 +6,54 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+// PATCH /api/sessions/[id]/summarize - Update summary
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  const { id: sessionId } = await params;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { overview, key_points, decisions } = body;
+
+  // Find the summary for this session
+  const { data: summary, error: findError } = await supabase
+    .from("summaries")
+    .select("id")
+    .eq("session_id", sessionId)
+    .single();
+
+  if (findError || !summary) {
+    return NextResponse.json({ error: "Summary not found" }, { status: 404 });
+  }
+
+  // Update the summary
+  const updateData: Record<string, unknown> = { edited_at: new Date().toISOString() };
+  if (overview !== undefined) updateData.overview = overview;
+  if (key_points !== undefined) updateData.key_points = key_points;
+  if (decisions !== undefined) updateData.decisions = decisions;
+
+  const { data: updatedSummary, error: updateError } = await supabase
+    .from("summaries")
+    .update(updateData)
+    .eq("id", summary.id)
+    .select()
+    .single();
+
+  if (updateError) {
+    return NextResponse.json({ error: "Failed to update summary" }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, summary: updatedSummary });
+}
+
 // POST /api/sessions/[id]/summarize - Generate summary for a session
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const { id: sessionId } = await params;

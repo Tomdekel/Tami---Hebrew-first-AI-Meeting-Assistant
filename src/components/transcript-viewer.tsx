@@ -25,6 +25,8 @@ interface TranscriptViewerProps {
   selectedSegments?: Set<number>;
   /** Called when segment selection changes */
   onSelectionChange?: (selected: Set<number>) => void;
+  /** Search query to filter and highlight segments */
+  searchQuery?: string;
 }
 
 // Timestamp interval in seconds (show timestamp markers every 30 seconds)
@@ -58,16 +60,45 @@ export function TranscriptViewer({
   editMode = false,
   selectedSegments = new Set(),
   onSelectionChange,
+  searchQuery = "",
 }: TranscriptViewerProps) {
   const [activeParagraphKey, setActiveParagraphKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const paragraphRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   // Filter out soft-deleted segments (from deep refinement)
-  const segments = useMemo(
+  const allSegments = useMemo(
     () => rawSegments.filter((s) => !s.isDeleted),
     [rawSegments]
   );
+
+  // Normalize search query
+  const normalizedSearch = useMemo(() => searchQuery.trim().toLowerCase(), [searchQuery]);
+
+  // Filter segments based on search query
+  const segments = useMemo(() => {
+    if (!normalizedSearch) return allSegments;
+    return allSegments.filter((s) =>
+      s.text.toLowerCase().includes(normalizedSearch) ||
+      s.speakerName.toLowerCase().includes(normalizedSearch)
+    );
+  }, [allSegments, normalizedSearch]);
+
+  // Highlight search matches in text
+  const highlightText = useCallback((text: string): React.ReactNode => {
+    if (!normalizedSearch) return text;
+    const regex = new RegExp(`(${normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+    const parts = text.split(regex);
+    return parts.map((part, i) =>
+      part.toLowerCase() === normalizedSearch ? (
+        <mark key={i} className="bg-yellow-300/50 dark:bg-yellow-500/30 rounded px-0.5">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  }, [normalizedSearch]);
 
   // Detect RTL content (Hebrew)
   const isRTL = useMemo(() => {
@@ -340,7 +371,7 @@ export function TranscriptViewer({
                         <div className="text-xs text-muted-foreground font-mono mb-1">
                           {formatTime(seg.startTime)}
                         </div>
-                        <p className="leading-relaxed text-foreground">{seg.text}</p>
+                        <p className="leading-relaxed text-foreground">{highlightText(seg.text)}</p>
                       </div>
                     </div>
                   );
@@ -377,7 +408,7 @@ export function TranscriptViewer({
                       </div>
 
                       {/* Merged text */}
-                      <p className="leading-relaxed text-foreground">{para.text}</p>
+                      <p className="leading-relaxed text-foreground">{highlightText(para.text)}</p>
                     </div>
                   );
                 })}
@@ -389,7 +420,9 @@ export function TranscriptViewer({
 
       {segments.length === 0 && (
         <div className="text-center text-muted-foreground py-8">
-          No transcript available
+          {normalizedSearch && allSegments.length > 0
+            ? `No matches for "${searchQuery}"`
+            : "No transcript available"}
         </div>
       )}
     </div>

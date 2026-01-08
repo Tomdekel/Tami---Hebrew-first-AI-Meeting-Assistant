@@ -22,6 +22,7 @@ import {
   RotateCcw,
   FileDown,
   Brain,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,10 +48,10 @@ import { toast } from "sonner";
 import { useSession, updateSession, deleteSession, startTranscription } from "@/hooks/use-session";
 import { AudioPlayer } from "@/components/audio-player";
 import { TranscriptViewer } from "@/components/transcript-viewer";
-import { SpeakersPanel } from "@/components/speakers-panel";
 import { SummaryPanel } from "@/components/summary-panel";
 import { ChatPanel } from "@/components/chat-panel";
-import { MeetingNavigation } from "@/components/meeting-navigation";
+import { MeetingsSidebar } from "@/components/meetings-sidebar";
+import { ActionItemsEditor } from "@/components/action-items-editor";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -110,9 +111,8 @@ export default function SessionDetailPage({ params }: PageProps) {
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
 
-  // Speakers state
-  const [speakers, setSpeakers] = useState<Speaker[]>([]);
-  const [speakersLoaded, setSpeakersLoaded] = useState(false);
+  // Transcript search state
+  const [transcriptSearch, setTranscriptSearch] = useState("");
 
   // Reprocess/export state
   const [isReprocessing, setIsReprocessing] = useState(false);
@@ -140,32 +140,10 @@ export default function SessionDetailPage({ params }: PageProps) {
     }
   }, [id, tagsLoaded]);
 
-  // Load speakers
-  const loadSpeakers = useCallback(async () => {
-    if (speakersLoaded) return;
-    try {
-      const res = await fetch(`/api/sessions/${id}/speakers`);
-      if (res.ok) {
-        const data = await res.json();
-        setSpeakers(data.speakers || []);
-      }
-      setSpeakersLoaded(true);
-    } catch (err) {
-      console.error("Failed to load speakers:", err);
-    }
-  }, [id, speakersLoaded]);
-
   // Load on mount
   useEffect(() => {
     loadTags();
   }, [loadTags]);
-
-  // Load speakers when transcript is ready
-  useEffect(() => {
-    if (session?.transcript?.segments?.length) {
-      loadSpeakers();
-    }
-  }, [session?.transcript?.segments?.length, loadSpeakers]);
 
   const handleStartTranscription = async () => {
     setIsTranscribing(true);
@@ -591,16 +569,6 @@ export default function SessionDetailPage({ params }: PageProps) {
 
       <Separator className="my-6" />
 
-      {/* Audio Player */}
-      {session.audio_url && (
-        <div className="mb-6">
-          <AudioPlayer
-            src={session.audio_url}
-            onTimeUpdate={setAudioCurrentTime}
-          />
-        </div>
-      )}
-
       {/* Processing States */}
       {session.status === "pending" && session.audio_url && (
         <Card className="mb-6">
@@ -615,34 +583,6 @@ export default function SessionDetailPage({ params }: PageProps) {
               {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
               {t("meeting.startTranscription")}
             </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {session.status === "processing" && (
-        <Card className="mb-6">
-          <CardContent className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
-              <h3 className="font-medium">{t("meeting.transcribing")}</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {t("meeting.transcribingDesc")}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {session.status === "refining" && (
-        <Card className="mb-6">
-          <CardContent className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <Sparkles className="h-12 w-12 animate-pulse text-primary mx-auto mb-4" />
-              <h3 className="font-medium">{t("meeting.refining")}</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {t("meeting.refiningDesc")}
-              </p>
-            </div>
           </CardContent>
         </Card>
       )}
@@ -667,45 +607,12 @@ export default function SessionDetailPage({ params }: PageProps) {
         </Card>
       )}
 
-      {/* Main Content: Two-Column Layout */}
+      {/* Main Content: Three-Column Layout */}
       {(hasTranscript || session.status === "processing" || session.status === "refining") && (
-        <div className="flex gap-6 flex-col-reverse lg:flex-row">
-          {/* Sidebar - On the left for RTL */}
-          <aside className="lg:w-80 shrink-0 space-y-4">
-            {/* Speakers */}
-            <SpeakersPanel
-              sessionId={id}
-              speakers={speakers}
-              onSpeakersChange={setSpeakers}
-              onRefresh={() => {
-                setSpeakersLoaded(false);
-                loadSpeakers();
-                refetch();
-              }}
-              isProcessing={session.status === "processing" || session.status === "refining"}
-            />
-
-            {/* Summary */}
-            <SummaryPanel
-              sessionId={id}
-              summary={session.summary || null}
-              onRefresh={refetch}
-              isProcessing={session.status === "processing" || session.status === "refining"}
-            />
-
-            {/* Chat */}
-            <ChatPanel
-              sessionId={id}
-              isProcessing={session.status === "processing" || session.status === "refining"}
-            />
-
-            {/* Navigation */}
-            <MeetingNavigation sessionId={id} />
-          </aside>
-
-          {/* Main Content - Transcript */}
-          <div className="flex-1 min-w-0">
-            <Card>
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px_280px] gap-6">
+          {/* LEFT COLUMN - Transcript */}
+          <div className="min-w-0 order-2 lg:order-1">
+            <Card className="h-full">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div>
@@ -721,21 +628,96 @@ export default function SessionDetailPage({ params }: PageProps) {
                     </CardDescription>
                   </div>
                 </div>
+                {/* Transcript Search */}
+                <div className="relative mt-3">
+                  <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    placeholder={t("search.placeholder")}
+                    value={transcriptSearch}
+                    onChange={(e) => setTranscriptSearch(e.target.value)}
+                    className="ps-9"
+                  />
+                  {transcriptSearch && (
+                    <button
+                      onClick={() => setTranscriptSearch("")}
+                      className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {hasTranscript ? (
                   <TranscriptViewer
                     segments={transcriptSegments}
                     currentTime={audioCurrentTime}
+                    searchQuery={transcriptSearch}
                   />
                 ) : (
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
-                    <Loader2 className="h-6 w-6 animate-spin me-2" />
-                    {t("meeting.processingTranscript") || "מעבד את התמלול..."}
+                    {session.status === "processing" ? (
+                      <>
+                        <Loader2 className="h-6 w-6 animate-spin me-2" />
+                        {t("meeting.transcribing")}
+                      </>
+                    ) : session.status === "refining" ? (
+                      <>
+                        <Sparkles className="h-6 w-6 animate-pulse me-2" />
+                        {t("meeting.refining")}
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 className="h-6 w-6 animate-spin me-2" />
+                        {t("meeting.processingTranscript") || "מעבד את התמלול..."}
+                      </>
+                    )}
                   </div>
                 )}
               </CardContent>
             </Card>
+          </div>
+
+          {/* CENTER COLUMN - Player, Summary, Chat */}
+          <div className="space-y-4 order-1 lg:order-2">
+            {/* Audio Player */}
+            {session.audio_url && (
+              <Card>
+                <CardContent className="py-4">
+                  <AudioPlayer
+                    src={session.audio_url}
+                    onTimeUpdate={setAudioCurrentTime}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Summary */}
+            <SummaryPanel
+              sessionId={id}
+              summary={session.summary || null}
+              onRefresh={refetch}
+              isProcessing={session.status === "processing" || session.status === "refining"}
+            />
+
+            {/* Action Items */}
+            <ActionItemsEditor
+              sessionId={id}
+              initialItems={session.summary?.action_items || []}
+              isProcessing={session.status === "processing" || session.status === "refining"}
+            />
+
+            {/* Chat */}
+            <ChatPanel
+              sessionId={id}
+              isProcessing={session.status === "processing" || session.status === "refining"}
+            />
+          </div>
+
+          {/* RIGHT COLUMN - Meetings List */}
+          <div className="order-3 hidden lg:block">
+            <MeetingsSidebar currentSessionId={id} />
           </div>
         </div>
       )}
