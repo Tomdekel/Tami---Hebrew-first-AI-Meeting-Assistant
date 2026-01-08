@@ -49,7 +49,7 @@ export const tagSchema = z.object({
 export const attachmentSchema = z.object({
   name: z.string().min(1).max(255),
   type: z.string().max(100),
-  size: z.number().positive().max(50 * 1024 * 1024), // 50MB max
+  size: z.number().positive().max(500 * 1024 * 1024), // 500MB max
 });
 
 export const actionItemSchema = z.object({

@@ -25,7 +25,7 @@ const ALLOWED_TYPES = [
   "image/webp",
 ];
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 /**
  * GET /api/sessions/[id]/attachments
@@ -140,7 +140,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     // Validate file size
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { error: "File size exceeds 10MB limit" },
+        { error: "File size exceeds 100MB limit" },
         { status: 400 }
       );
     }
