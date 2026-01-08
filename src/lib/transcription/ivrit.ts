@@ -1,21 +1,18 @@
 import type { TranscriptResult, TranscriptionOptions, TranscriptionProvider, TranscriptSegment } from "./types";
 
-interface IvritSegment {
+// Actual format from Ivrit AI RunPod endpoint
+interface IvritOutputSegment {
   start: number;
   end: number;
   text: string;
-  speaker?: string;
-}
-
-interface IvritResponse {
-  output?: {
-    transcription?: string;
-    segments?: IvritSegment[];
-    language?: string;
-    duration?: number;
-  };
-  status?: string;
-  error?: string;
+  speakers?: string[];
+  words?: Array<{
+    word: string;
+    start: number;
+    end: number;
+    speaker?: string;
+    probability?: number;
+  }>;
 }
 
 // Response from /run endpoint (async job submission)
@@ -25,16 +22,15 @@ interface IvritAsyncJobResponse {
 }
 
 // Response from /status/{jobId} endpoint
+// Actual format: output[0].result[0] = array of segments
 export interface IvritJobStatusResponse {
   id: string;
   status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "CANCELLED";
-  output?: {
-    transcription?: string;
-    segments?: IvritSegment[];
-    language?: string;
-    duration?: number;
-  };
+  output?: Array<{
+    result?: Array<Array<IvritOutputSegment>>;
+  }>;
   error?: string;
+  executionTime?: number;
 }
 
 export class IvritProvider implements TranscriptionProvider {
@@ -95,38 +91,11 @@ export class IvritProvider implements TranscriptionProvider {
       throw new Error(`Ivrit API error: ${response.status} - ${error}`);
     }
 
-    const data: IvritResponse = await response.json();
+    // runsync returns same format as status endpoint
+    const data: IvritJobStatusResponse = await response.json();
 
-    if (data.error) {
-      throw new Error(`Ivrit transcription error: ${data.error}`);
-    }
-
-    if (!data.output) {
-      throw new Error("Ivrit API returned no output");
-    }
-
-    // Parse segments with speaker diarization
-    const segments: TranscriptSegment[] = data.output.segments?.map((seg) => ({
-      speaker: seg.speaker || "Speaker 1",
-      text: seg.text.trim(),
-      start: seg.start,
-      end: seg.end,
-    })) || [{
-      speaker: "Speaker 1",
-      text: data.output.transcription?.trim() || "",
-      start: 0,
-      end: data.output.duration || 0,
-    }];
-
-    // Build full text from segments
-    const fullText = segments.map((s) => s.text).join(" ");
-
-    return {
-      language: "he",
-      segments,
-      fullText,
-      duration: data.output.duration || 0,
-    };
+    // Use shared parsing logic
+    return this.parseJobOutput(data);
   }
 
   /**
@@ -192,6 +161,7 @@ export class IvritProvider implements TranscriptionProvider {
 
   /**
    * Parse completed job output into TranscriptResult
+   * Actual RunPod format: output[0].result[0] = array of segments
    */
   parseJobOutput(jobStatus: IvritJobStatusResponse): TranscriptResult {
     if (jobStatus.status !== "COMPLETED") {
@@ -202,31 +172,41 @@ export class IvritProvider implements TranscriptionProvider {
       throw new Error(`Ivrit transcription error: ${jobStatus.error}`);
     }
 
-    if (!jobStatus.output) {
+    if (!jobStatus.output || !Array.isArray(jobStatus.output) || jobStatus.output.length === 0) {
       throw new Error("Ivrit API returned no output");
     }
 
+    // Navigate to the actual segments: output[0].result[0]
+    const firstOutput = jobStatus.output[0];
+    if (!firstOutput.result || !Array.isArray(firstOutput.result) || firstOutput.result.length === 0) {
+      throw new Error("Ivrit API returned no result in output");
+    }
+
+    const rawSegments = firstOutput.result[0];
+    if (!Array.isArray(rawSegments) || rawSegments.length === 0) {
+      throw new Error("Ivrit API returned empty segments");
+    }
+
     // Parse segments with speaker diarization
-    const segments: TranscriptSegment[] = jobStatus.output.segments?.map((seg) => ({
-      speaker: seg.speaker || "Speaker 1",
+    // Format: { text, start, end, speakers: ["SPEAKER_00"] }
+    const segments: TranscriptSegment[] = rawSegments.map((seg) => ({
+      speaker: seg.speakers?.[0]?.replace("SPEAKER_", "Speaker ") || "Speaker 1",
       text: seg.text.trim(),
       start: seg.start,
       end: seg.end,
-    })) || [{
-      speaker: "Speaker 1",
-      text: jobStatus.output.transcription?.trim() || "",
-      start: 0,
-      end: jobStatus.output.duration || 0,
-    }];
+    }));
 
     // Build full text from segments
     const fullText = segments.map((s) => s.text).join(" ");
+
+    // Calculate duration from last segment
+    const duration = segments.length > 0 ? segments[segments.length - 1].end : 0;
 
     return {
       language: "he",
       segments,
       fullText,
-      duration: jobStatus.output.duration || 0,
+      duration,
     };
   }
 
