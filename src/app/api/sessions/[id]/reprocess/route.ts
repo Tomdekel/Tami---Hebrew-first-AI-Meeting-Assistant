@@ -8,6 +8,32 @@ interface RouteParams {
 type ReprocessStep = "transcription" | "summary" | "entities" | "embeddings" | "all";
 
 /**
+ * Get the base URL for internal API calls
+ * Works on both localhost and Vercel
+ */
+function getBaseUrl(request: Request): string {
+  // First check explicit env var
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+
+  // Vercel sets this automatically
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  // Extract from request headers (works in production)
+  const host = request.headers.get("host");
+  const protocol = request.headers.get("x-forwarded-proto") || "https";
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+
+  // Fallback for local development
+  return "http://localhost:3000";
+}
+
+/**
  * POST /api/sessions/[id]/reprocess
  * Reprocess a session (re-run transcription, summary, entities, or embeddings)
  */
@@ -72,7 +98,7 @@ export async function POST(request: Request, { params }: RouteParams) {
           }
 
           // Trigger transcription via the transcribe endpoint
-          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+          const baseUrl = getBaseUrl(request);
           const transcribeResponse = await fetch(`${baseUrl}/api/sessions/${id}/transcribe`, {
             method: "POST",
             headers: {
@@ -103,7 +129,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         await supabase.from("summaries").delete().eq("session_id", id);
 
         // Trigger summarization
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const baseUrl = getBaseUrl(request);
         const summaryResponse = await fetch(`${baseUrl}/api/sessions/${id}/summarize`, {
           method: "POST",
           headers: {
@@ -133,7 +159,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         await supabase.from("entity_mentions").delete().eq("session_id", id);
 
         // Trigger entity extraction
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const baseUrl = getBaseUrl(request);
         const entitiesResponse = await fetch(`${baseUrl}/api/sessions/${id}/entities`, {
           method: "POST",
           headers: {
@@ -164,7 +190,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (shouldRunAll || steps.includes("embeddings")) {
       try {
         // Trigger embedding generation
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const baseUrl = getBaseUrl(request);
         const embeddingsResponse = await fetch(`${baseUrl}/api/sessions/${id}/embeddings`, {
           method: "POST",
           headers: {
