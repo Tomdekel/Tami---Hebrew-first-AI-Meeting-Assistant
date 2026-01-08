@@ -241,6 +241,7 @@ ACTIVELY FIX THESE COMMON ASR ERRORS:
 5. Word boundary errors:
    - "וויליאמס וויליאן" → "ויליאמסבורג"
    - "כיפה בניו יורק" → "כיפאק, איפה בניו יורק" (missing punctuation + mishearing)
+   - "כיף" when it should be "איפה" (where) - common mishearing in questions
 6. Filler words transcribed multiple times ("אהה" alone should be deleted)
 7. Hebrew preposition errors:
    - "בעל" when it should be "בא ל" (coming to)
