@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 interface TranscriptSegment {
@@ -19,28 +19,28 @@ interface TranscriptViewerProps {
   className?: string;
 }
 
-// Speaker colors for visual distinction
-const SPEAKER_COLORS = [
-  "border-l-blue-500",
-  "border-l-green-500",
-  "border-l-purple-500",
-  "border-l-orange-500",
-  "border-l-pink-500",
-  "border-l-cyan-500",
-  "border-l-yellow-500",
-  "border-l-red-500",
+// Timestamp interval in seconds (show timestamp markers every 30 seconds)
+const TIMESTAMP_INTERVAL = 30;
+
+// Subtle speaker colors with tinted backgrounds
+const SPEAKER_STYLES = [
+  { border: "border-l-blue-500/60", bg: "bg-blue-500/5 dark:bg-blue-500/10" },
+  { border: "border-l-emerald-500/60", bg: "bg-emerald-500/5 dark:bg-emerald-500/10" },
+  { border: "border-l-violet-500/60", bg: "bg-violet-500/5 dark:bg-violet-500/10" },
+  { border: "border-l-amber-500/60", bg: "bg-amber-500/5 dark:bg-amber-500/10" },
+  { border: "border-l-rose-500/60", bg: "bg-rose-500/5 dark:bg-rose-500/10" },
+  { border: "border-l-cyan-500/60", bg: "bg-cyan-500/5 dark:bg-cyan-500/10" },
+  { border: "border-l-orange-500/60", bg: "bg-orange-500/5 dark:bg-orange-500/10" },
+  { border: "border-l-pink-500/60", bg: "bg-pink-500/5 dark:bg-pink-500/10" },
 ];
 
-const SPEAKER_BG_COLORS = [
-  "bg-blue-50 dark:bg-blue-950/30",
-  "bg-green-50 dark:bg-green-950/30",
-  "bg-purple-50 dark:bg-purple-950/30",
-  "bg-orange-50 dark:bg-orange-950/30",
-  "bg-pink-50 dark:bg-pink-950/30",
-  "bg-cyan-50 dark:bg-cyan-950/30",
-  "bg-yellow-50 dark:bg-yellow-950/30",
-  "bg-red-50 dark:bg-red-950/30",
-];
+interface TimestampedParagraph {
+  timestamp: number;
+  endTime: number;
+  text: string;
+  startSegmentIndex: number;
+  endSegmentIndex: number;
+}
 
 export function TranscriptViewer({
   segments,
@@ -48,56 +48,132 @@ export function TranscriptViewer({
   onSegmentClick,
   className,
 }: TranscriptViewerProps) {
-  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number>(-1);
+  const [activeParagraphKey, setActiveParagraphKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const segmentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const paragraphRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
+  // Detect RTL content (Hebrew)
+  const isRTL = useMemo(() => {
+    const fullText = segments.map((s) => s.text).join("");
+    const hebrewPattern = /[\u0590-\u05FF]/g;
+    const hebrewChars = (fullText.match(hebrewPattern) || []).length;
+    return hebrewChars > fullText.length * 0.3;
+  }, [segments]);
 
   // Build speaker color map
-  const speakerColorMap = useCallback(() => {
+  const speakerStyleMap = useMemo(() => {
     const map = new Map<string, number>();
-    let colorIndex = 0;
+    let styleIndex = 0;
     segments.forEach((seg) => {
       if (!map.has(seg.speakerId)) {
-        map.set(seg.speakerId, colorIndex % SPEAKER_COLORS.length);
-        colorIndex++;
+        map.set(seg.speakerId, styleIndex % SPEAKER_STYLES.length);
+        styleIndex++;
       }
     });
     return map;
   }, [segments]);
 
-  const colorMap = speakerColorMap();
+  // Group consecutive segments by speaker
+  const groupedSegments = useMemo(() => {
+    return segments.reduce<
+      Array<{ speakerId: string; speakerName: string; segments: TranscriptSegment[] }>
+    >((groups, segment) => {
+      const lastGroup = groups[groups.length - 1];
 
-  // Update active segment based on current time
+      if (lastGroup && lastGroup.speakerId === segment.speakerId) {
+        lastGroup.segments.push(segment);
+      } else {
+        groups.push({
+          speakerId: segment.speakerId,
+          speakerName: segment.speakerName,
+          segments: [segment],
+        });
+      }
+
+      return groups;
+    }, []);
+  }, [segments]);
+
+  // Build paragraphs from segments within each group (merge by time intervals)
+  const buildParagraphs = useCallback(
+    (groupSegments: TranscriptSegment[]): TimestampedParagraph[] => {
+      const paragraphs: TimestampedParagraph[] = [];
+      let currentParagraph: TimestampedParagraph | null = null;
+
+      groupSegments.forEach((seg) => {
+        const globalIdx = segments.findIndex((s) => s.segmentOrder === seg.segmentOrder);
+
+        if (
+          !currentParagraph ||
+          seg.startTime - currentParagraph.timestamp >= TIMESTAMP_INTERVAL
+        ) {
+          // Start new paragraph
+          if (currentParagraph) paragraphs.push(currentParagraph);
+          currentParagraph = {
+            timestamp: seg.startTime,
+            endTime: seg.endTime,
+            text: seg.text,
+            startSegmentIndex: globalIdx,
+            endSegmentIndex: globalIdx,
+          };
+        } else {
+          // Append to current paragraph
+          currentParagraph.text += " " + seg.text;
+          currentParagraph.endTime = seg.endTime;
+          currentParagraph.endSegmentIndex = globalIdx;
+        }
+      });
+
+      if (currentParagraph) paragraphs.push(currentParagraph);
+      return paragraphs;
+    },
+    [segments]
+  );
+
+  // Update active paragraph based on current time
   useEffect(() => {
     if (currentTime === undefined || currentTime < 0) return;
 
-    const activeIndex = segments.findIndex(
-      (seg) => currentTime >= seg.startTime && currentTime < seg.endTime
-    );
+    // Find the active paragraph by checking all groups
+    let foundKey: string | null = null;
 
-    if (activeIndex !== activeSegmentIndex) {
-      setActiveSegmentIndex(activeIndex);
+    groupedSegments.forEach((group, groupIndex) => {
+      const paragraphs = buildParagraphs(group.segments);
+      paragraphs.forEach((para, paraIndex) => {
+        if (currentTime >= para.timestamp && currentTime < para.endTime) {
+          foundKey = `${group.speakerId}-${groupIndex}-${paraIndex}`;
+        }
+      });
+    });
 
-      // Auto-scroll to active segment
-      if (activeIndex >= 0 && segmentRefs.current[activeIndex]) {
-        segmentRefs.current[activeIndex]?.scrollIntoView({
+    if (foundKey !== activeParagraphKey) {
+      setActiveParagraphKey(foundKey);
+
+      // Auto-scroll to active paragraph
+      if (foundKey && paragraphRefs.current.get(foundKey)) {
+        paragraphRefs.current.get(foundKey)?.scrollIntoView({
           behavior: "smooth",
           block: "center",
         });
       }
     }
-  }, [currentTime, segments, activeSegmentIndex]);
+  }, [currentTime, groupedSegments, buildParagraphs, activeParagraphKey]);
 
-  const handleSegmentClick = useCallback(
-    (segment: TranscriptSegment) => {
+  const handleParagraphClick = useCallback(
+    (para: TimestampedParagraph) => {
       // Try to use the global seekTo function
-      const seekFn = (window as unknown as { audioPlayerSeekTo?: (time: number) => void }).audioPlayerSeekTo;
+      const seekFn = (window as unknown as { audioPlayerSeekTo?: (time: number) => void })
+        .audioPlayerSeekTo;
       if (seekFn) {
-        seekFn(segment.startTime);
+        seekFn(para.timestamp);
       }
-      onSegmentClick?.(segment);
+      // Also call the segment click handler with the first segment
+      if (onSegmentClick && para.startSegmentIndex >= 0) {
+        const segment = segments[para.startSegmentIndex];
+        if (segment) onSegmentClick(segment);
+      }
     },
-    [onSegmentClick]
+    [onSegmentClick, segments]
   );
 
   const formatTime = useCallback((seconds: number): string => {
@@ -106,79 +182,62 @@ export function TranscriptViewer({
     return `${m}:${s.toString().padStart(2, "0")}`;
   }, []);
 
-  // Group consecutive segments by speaker
-  const groupedSegments = segments.reduce<
-    Array<{ speakerId: string; speakerName: string; segments: TranscriptSegment[] }>
-  >((groups, segment) => {
-    const lastGroup = groups[groups.length - 1];
-
-    if (lastGroup && lastGroup.speakerId === segment.speakerId) {
-      lastGroup.segments.push(segment);
-    } else {
-      groups.push({
-        speakerId: segment.speakerId,
-        speakerName: segment.speakerName,
-        segments: [segment],
-      });
-    }
-
-    return groups;
-  }, []);
-
   return (
     <div
       ref={containerRef}
+      dir={isRTL ? "rtl" : "ltr"}
       className={cn("space-y-4 max-h-[600px] overflow-y-auto", className)}
     >
       {groupedSegments.map((group, groupIndex) => {
-        const colorIndex = colorMap.get(group.speakerId) ?? 0;
-        const borderColor = SPEAKER_COLORS[colorIndex];
-        const bgColor = SPEAKER_BG_COLORS[colorIndex];
+        const styleIndex = speakerStyleMap.get(group.speakerId) ?? 0;
+        const style = SPEAKER_STYLES[styleIndex];
+        const paragraphs = buildParagraphs(group.segments);
 
         return (
           <div
             key={`${group.speakerId}-${groupIndex}`}
             className={cn(
-              "border-l-4 rounded-r-lg p-3 transition-colors",
-              borderColor,
-              bgColor
+              "border-l-4 rounded-lg p-4 transition-colors",
+              style.border,
+              style.bg
             )}
           >
             {/* Speaker Name */}
-            <div className="font-medium text-sm mb-2">{group.speakerName}</div>
+            <div className="font-medium text-sm mb-3 text-muted-foreground">
+              {group.speakerName}
+            </div>
 
-            {/* Segments */}
-            <div className="space-y-2">
-              {group.segments.map((segment, segIndex) => {
-                const flatIndex = segments.findIndex(
-                  (s) => s.segmentOrder === segment.segmentOrder
-                );
-                const isActive = flatIndex === activeSegmentIndex;
+            {/* Paragraphs */}
+            <div className="space-y-4">
+              {paragraphs.map((para, paraIndex) => {
+                const paraKey = `${group.speakerId}-${groupIndex}-${paraIndex}`;
+                const isActive = paraKey === activeParagraphKey;
 
                 return (
                   <div
-                    key={segment.segmentOrder}
+                    key={paraKey}
                     ref={(el) => {
-                      segmentRefs.current[flatIndex] = el;
+                      paragraphRefs.current.set(paraKey, el);
                     }}
-                    onClick={() => handleSegmentClick(segment)}
+                    onClick={() => handleParagraphClick(para)}
                     className={cn(
-                      "p-2 rounded cursor-pointer transition-all text-sm",
-                      "hover:bg-accent/50",
-                      isActive && "bg-primary/10 ring-2 ring-primary/30"
+                      "cursor-pointer transition-all rounded-md p-2 -mx-2",
+                      "hover:bg-foreground/5",
+                      isActive && "bg-primary/10 ring-1 ring-primary/30"
                     )}
                   >
-                    <div className="flex items-start gap-2">
-                      <span
-                        className={cn(
-                          "text-xs text-muted-foreground shrink-0 font-mono mt-0.5",
-                          isActive && "text-primary font-medium"
-                        )}
-                      >
-                        {formatTime(segment.startTime)}
-                      </span>
-                      <p className="flex-1 leading-relaxed">{segment.text}</p>
+                    {/* Timestamp */}
+                    <div
+                      className={cn(
+                        "text-xs text-muted-foreground font-mono mb-1",
+                        isActive && "text-primary font-medium"
+                      )}
+                    >
+                      {formatTime(para.timestamp)}
                     </div>
+
+                    {/* Merged text */}
+                    <p className="leading-relaxed text-foreground">{para.text}</p>
                   </div>
                 );
               })}
