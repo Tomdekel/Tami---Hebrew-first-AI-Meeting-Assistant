@@ -33,6 +33,8 @@ import {
   GitMerge,
   CheckSquare,
   MessageSquare,
+  Lightbulb,
+  Check,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -313,6 +315,19 @@ export default function EntitiesPage() {
   const [showRelationshipDialog, setShowRelationshipDialog] = useState(false);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [showDuplicateReviewDialog, setShowDuplicateReviewDialog] = useState(false);
+  const [showSuggestionsDialog, setShowSuggestionsDialog] = useState(false);
+  const [suggestions, setSuggestions] = useState<{
+    id: string;
+    source_value: string;
+    target_value: string;
+    source_type: string;
+    target_type: string;
+    relationship_type: string;
+    confidence: number;
+    context: string | null;
+    sessions?: { title: string | null };
+  }[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   // Form states
   const [mergeTarget, setMergeTarget] = useState("");
@@ -396,11 +411,84 @@ export default function EntitiesPage() {
     }
   }, []);
 
+  // Load pending suggestions
+  const loadSuggestions = useCallback(async () => {
+    try {
+      setSuggestionsLoading(true);
+      const response = await fetch("/api/graph/suggestions?status=pending");
+      if (!response.ok) return;
+
+      const data = await response.json();
+      setSuggestions(data.suggestions || []);
+    } catch (err) {
+      console.error("Failed to load suggestions:", err);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, []);
+
+  // Handle suggestion action (approve/reject)
+  const handleSuggestionAction = async (suggestionId: string, action: "approve" | "reject") => {
+    try {
+      const response = await fetch("/api/graph/suggestions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suggestionId, action }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to process suggestion");
+      }
+
+      // Remove from local state
+      setSuggestions((prev) => prev.filter((s) => s.id !== suggestionId));
+
+      // Refresh entities and graph if approved
+      if (action === "approve") {
+        loadEntities();
+        loadGraphData();
+      }
+    } catch (err) {
+      console.error("Failed to handle suggestion:", err);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     loadEntities();
     loadGraphData();
-  }, [loadEntities, loadGraphData]);
+    loadSuggestions();
+  }, [loadEntities, loadGraphData, loadSuggestions]);
+
+  // Auto-refresh when tab is visible (every 30 seconds)
+  useEffect(() => {
+    const REFRESH_INTERVAL = 30000; // 30 seconds
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadEntities();
+        loadGraphData();
+        loadSuggestions();
+      }
+    };
+
+    // Set up interval for auto-refresh
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadEntities();
+        loadGraphData();
+        loadSuggestions();
+      }
+    }, REFRESH_INTERVAL);
+
+    // Also refresh when tab becomes visible
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadEntities, loadGraphData, loadSuggestions]);
 
   // Load relationships when entity is selected
   useEffect(() => {
@@ -650,6 +738,23 @@ export default function EntitiesPage() {
                 <p className="text-muted-foreground">{t("entities.description")}</p>
               </div>
               <div className="flex gap-2">
+                {/* Suggestions Button */}
+                <Button
+                  variant="outline"
+                  className="gap-2 bg-transparent relative"
+                  onClick={() => {
+                    setShowSuggestionsDialog(true);
+                    loadSuggestions();
+                  }}
+                >
+                  <Lightbulb className="w-4 h-4" />
+                  {t("entities.suggestions.reviewSuggestions")}
+                  {suggestions.length > 0 && (
+                    <Badge variant="destructive" className="absolute -top-2 -end-2 h-5 w-5 p-0 flex items-center justify-center text-[10px]">
+                      {suggestions.length}
+                    </Badge>
+                  )}
+                </Button>
                 <Button
                   variant="outline"
                   className="gap-2 bg-transparent"
@@ -1332,6 +1437,95 @@ export default function EntitiesPage() {
           loadGraphData();
         }}
       />
+
+      {/* Suggestions Dialog */}
+      <Dialog open={showSuggestionsDialog} onOpenChange={setShowSuggestionsDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lightbulb className="w-5 h-5 text-yellow-500" />
+              {t("entities.suggestions.title")}
+            </DialogTitle>
+            <DialogDescription>
+              {t("entities.suggestions.description")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-3 py-4">
+            {suggestionsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : suggestions.length === 0 ? (
+              <div className="text-center py-8">
+                <Lightbulb className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
+                <p className="text-sm text-muted-foreground">{t("entities.suggestions.noSuggestions")}</p>
+                <p className="text-xs text-muted-foreground mt-1">{t("entities.suggestions.noSuggestionsDesc")}</p>
+              </div>
+            ) : (
+              suggestions.map((suggestion) => {
+                const confidenceColor = suggestion.confidence >= 0.6 ? "bg-yellow-100 text-yellow-700" :
+                                       "bg-orange-100 text-orange-700";
+                return (
+                  <div key={suggestion.id} className="p-4 border rounded-lg bg-card">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{suggestion.source_value}</span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                            {suggestion.relationship_type.replace(/_/g, " ")}
+                          </span>
+                          <span className="font-medium text-sm">{suggestion.target_value}</span>
+                        </div>
+                        {suggestion.context && (
+                          <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
+                            &ldquo;{suggestion.context}&rdquo;
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${confidenceColor}`}>
+                            {Math.round(suggestion.confidence * 100)}% {t("entities.suggestions.confidence")}
+                          </span>
+                          {suggestion.sessions?.title && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {t("entities.suggestions.fromMeeting")}: {suggestion.sessions.title}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleSuggestionAction(suggestion.id, "reject")}
+                        >
+                          <X className="w-3 h-3" />
+                          {t("entities.suggestions.reject")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-8 gap-1"
+                          onClick={() => handleSuggestionAction(suggestion.id, "approve")}
+                        >
+                          <Check className="w-3 h-3" />
+                          {t("entities.suggestions.approve")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSuggestionsDialog(false)}>
+              {t("entities.close")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

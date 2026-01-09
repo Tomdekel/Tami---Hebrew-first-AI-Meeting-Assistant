@@ -550,6 +550,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
               currentTime={audioCurrentTime}
               onSeek={handleSeek}
               onEditSpeaker={handleEditSpeaker}
+              status={session.status}
             />
           </div>
 

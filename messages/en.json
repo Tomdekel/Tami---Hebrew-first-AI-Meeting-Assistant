@@ -345,6 +345,22 @@
       "location": "Geographic locations",
       "date": "Dates and times",
       "other": "Other entities"
+    },
+    "suggestions": {
+      "title": "Relationship Suggestions",
+      "description": "AI-suggested relationships for your review",
+      "noSuggestions": "No pending suggestions",
+      "noSuggestionsDesc": "New suggestions will appear here after processing meetings",
+      "approve": "Approve",
+      "reject": "Reject",
+      "approveAll": "Approve All",
+      "rejectAll": "Reject All",
+      "pending": "pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "confidence": "confidence",
+      "fromMeeting": "From meeting",
+      "reviewSuggestions": "Review Suggestions"
     }
   },
   "systemAudio": {

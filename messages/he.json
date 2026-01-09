@@ -357,6 +357,22 @@
       "location": "מיקומים גיאוגרפיים",
       "date": "תאריכים וזמנים",
       "other": "ישויות אחרות"
+    },
+    "suggestions": {
+      "title": "הצעות לקשרים",
+      "description": "קשרים שהוצעו על ידי הבינה המלאכותית לבדיקתך",
+      "noSuggestions": "אין הצעות ממתינות",
+      "noSuggestionsDesc": "הצעות חדשות יופיעו כאן לאחר עיבוד פגישות",
+      "approve": "אשר",
+      "reject": "דחה",
+      "approveAll": "אשר הכל",
+      "rejectAll": "דחה הכל",
+      "pending": "ממתין",
+      "approved": "אושר",
+      "rejected": "נדחה",
+      "confidence": "ביטחון",
+      "fromMeeting": "מפגישה",
+      "reviewSuggestions": "בדוק הצעות"
     }
   },
   "systemAudio": {

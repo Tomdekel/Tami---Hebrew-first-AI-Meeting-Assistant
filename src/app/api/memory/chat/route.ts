@@ -20,20 +20,30 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { question, language = "en" } = body;
+  const { question } = body;
+  // Validate language - whitelist to prevent unexpected values
+  const language = body.language === "he" ? "he" : "en";
 
   if (!question || typeof question !== "string") {
     return NextResponse.json({ error: "Question is required" }, { status: 400 });
+  }
+
+  // Validate question length to prevent excessive costs and DoS
+  if (question.length > 5000) {
+    return NextResponse.json({ error: "Question must be under 5000 characters" }, { status: 400 });
   }
 
   try {
     // Generate embedding for the question
     const questionEmbedding = await generateEmbedding(question);
 
+    // Convert embedding array to vector string format for pgvector
+    const embeddingStr = `[${questionEmbedding.embedding.join(",")}]`;
+
     // Search for relevant context across ALL sessions using vector similarity
     const { data: relevantChunks, error: searchError } = await supabase
       .rpc("search_embeddings", {
-        query_embedding: questionEmbedding.embedding,
+        query_embedding: embeddingStr,
         match_threshold: SIMILARITY_THRESHOLD,
         match_count: MAX_CONTEXT_CHUNKS,
         p_user_id: user.id,
@@ -101,8 +111,26 @@ export async function POST(request: NextRequest) {
       language
     );
 
-    // Save to global chat history (optional - create table if needed)
-    // For now, we'll just return the result
+    // Save both user question and assistant answer to chat history
+    const { error: insertError } = await supabase.from("memory_chat_messages").insert([
+      {
+        user_id: user.id,
+        role: "user",
+        content: question,
+        sources: [],
+      },
+      {
+        user_id: user.id,
+        role: "assistant",
+        content: answer,
+        sources: sources,
+      },
+    ]);
+
+    if (insertError) {
+      // Log error but don't fail the request - user still got their answer
+      console.error("Failed to save chat messages:", insertError);
+    }
 
     return NextResponse.json({
       answer,
@@ -118,12 +146,76 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET /api/memory/chat - Get global chat history (if we implement persistence later)
-export async function GET() {
-  // For now, global chat history is not persisted
-  // This endpoint can be implemented later if needed
-  return NextResponse.json({
-    messages: [],
-    info: "Global chat history is not yet persisted. Each conversation starts fresh."
-  });
+// GET /api/memory/chat - Get global chat history
+export async function GET(request: NextRequest) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const limit = Math.min(100, parseInt(searchParams.get("limit") || "50", 10));
+
+  try {
+    const { data: messages, error } = await supabase
+      .from("memory_chat_messages")
+      .select("id, role, content, sources, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(limit);
+
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({
+      messages: messages || [],
+      total: messages?.length || 0,
+    });
+  } catch (error) {
+    console.error("Failed to get chat history:", error);
+    return NextResponse.json(
+      { error: "Failed to get chat history" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/memory/chat - Clear chat history
+export async function DELETE(request: NextRequest) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { error } = await supabase
+      .from("memory_chat_messages")
+      .delete()
+      .eq("user_id", user.id);
+
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Failed to clear chat history:", error);
+    return NextResponse.json(
+      { error: "Failed to clear chat history" },
+      { status: 500 }
+    );
+  }
 }

@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -17,6 +17,7 @@ interface MeetingChatProps {
 
 export function MeetingChat({ sessionId, isProcessing = false, onSeek }: MeetingChatProps) {
   const t = useTranslations()
+  const locale = useLocale()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [isSending, setIsSending] = useState(false)
@@ -96,10 +97,10 @@ export function MeetingChat({ sessionId, isProcessing = false, onSeek }: Meeting
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString)
-    return date.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })
+    return date.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", { hour: "2-digit", minute: "2-digit" })
   }
 
-  const getInitials = () => "דכ" // Default user initials
+  const getInitials = () => t("chat.userInitials")
 
   if (isProcessing) {
     return (
@@ -126,7 +127,7 @@ export function MeetingChat({ sessionId, isProcessing = false, onSeek }: Meeting
             </Avatar>
             <div className="max-w-[80%] text-right">
               <div className="rounded-lg px-3 py-2 text-sm bg-muted">
-                שלום! אני יכול לענות על שאלות לגבי הפגישה הזו. מה תרצה לדעת?
+                {t("chat.greeting")}
               </div>
             </div>
           </div>
@@ -183,7 +184,7 @@ export function MeetingChat({ sessionId, isProcessing = false, onSeek }: Meeting
             <div className="max-w-[80%] text-right">
               <div className="rounded-lg px-3 py-2 text-sm bg-muted flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>מחפש בפגישה...</span>
+                <span>{t("chat.searchingMeeting")}</span>
               </div>
             </div>
           </div>

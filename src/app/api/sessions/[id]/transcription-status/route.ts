@@ -3,6 +3,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTranscriptionService } from "@/lib/transcription";
 import { deepRefineTranscript, applyDeepRefinements } from "@/lib/transcription/refinement";
 import { generateAndSaveSummary } from "@/lib/ai";
+import { generateEmbeddings, chunkTranscriptForEmbedding } from "@/lib/ai/embeddings";
+import { extractEntities, EntityType } from "@/lib/ai/entities";
+import { extractRelationships, isValidRelationshipType } from "@/lib/ai/relationships";
+import { runSingleQuery } from "@/lib/neo4j/client";
+
+// Valid entity types - must match EntityType from entities.ts
+const VALID_ENTITY_TYPES: readonly string[] = [
+  "person", "organization", "project", "topic",
+  "location", "date", "product", "technology", "other"
+];
+
+function isValidEntityType(type: string): type is EntityType {
+  return VALID_ENTITY_TYPES.includes(type);
+}
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -160,10 +174,329 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         console.error("Auto-summary failed:", summaryError);
       }
 
-      // Update session status to completed
+      // Auto-generate embeddings for memory chat
+      try {
+        // Fetch segments after refinement
+        const { data: finalSegments } = await supabase
+          .from("transcript_segments")
+          .select("speaker_id, speaker_name, text, start_time, segment_order")
+          .eq("transcript_id", transcript.id)
+          .is("is_deleted", false)
+          .order("segment_order");
+
+        if (finalSegments && finalSegments.length > 0) {
+          // Delete any existing embeddings for this session
+          await supabase.from("memory_embeddings").delete().eq("session_id", sessionId);
+
+          // Chunk transcript for embedding
+          const segments = finalSegments.map((seg) => ({
+            speakerId: seg.speaker_id,
+            speakerName: seg.speaker_name,
+            text: seg.text,
+            startTime: seg.start_time,
+          }));
+
+          const chunks = chunkTranscriptForEmbedding(segments);
+
+          if (chunks.length > 0) {
+            // Generate embeddings for all chunks
+            const embeddings = await generateEmbeddings(chunks.map((c) => c.text));
+
+            // Insert embeddings into database
+            // Note: Supabase expects a string representation of the vector for pgvector
+            const embeddingRecords = chunks.map((chunk, i) => ({
+              user_id: user.id,
+              session_id: sessionId,
+              content: chunk.text,
+              embedding: `[${embeddings[i].embedding.join(",")}]`,
+              metadata: {
+                speakerName: chunk.speakerName,
+                startTime: chunk.startTime,
+                segmentIndices: chunk.segmentIndices,
+              },
+            }));
+
+            const { error: embeddingError } = await supabase
+              .from("memory_embeddings")
+              .insert(embeddingRecords);
+
+            if (embeddingError) {
+              console.error("Failed to save embeddings:", embeddingError);
+            } else {
+              console.log(`Auto-embeddings generated: ${chunks.length} chunks for session ${sessionId}`);
+            }
+          }
+        }
+      } catch (embeddingError) {
+        // Log but don't fail - embeddings can be generated manually later
+        console.error("Auto-embedding failed:", embeddingError);
+      }
+
+      // Auto-extract entities from transcript
+      try {
+        // Format segments for entity extraction
+        const entitySegments = result.segments.map((seg) => ({
+          speaker: seg.speaker,
+          text: seg.text,
+        }));
+
+        // Extract entities using GPT-4o-mini
+        const entityResult = await extractEntities(
+          entitySegments,
+          result.language || "he"
+        );
+
+        // Save entities to database (Supabase AND Neo4j)
+        let extractedCount = 0;
+        for (const entity of entityResult.entities) {
+          // Check if entity already exists for this user
+          const { data: existingEntity } = await supabase
+            .from("entities")
+            .select("id, mention_count")
+            .eq("user_id", user.id)
+            .eq("type", entity.type)
+            .eq("normalized_value", entity.normalizedValue.toLowerCase())
+            .single();
+
+          let entityId: string;
+
+          if (existingEntity) {
+            // Update mention count
+            entityId = existingEntity.id;
+            await supabase
+              .from("entities")
+              .update({
+                mention_count: existingEntity.mention_count + entity.mentions,
+              })
+              .eq("id", entityId);
+          } else {
+            // Create new entity
+            const { data: newEntity, error: createError } = await supabase
+              .from("entities")
+              .insert({
+                user_id: user.id,
+                type: entity.type,
+                value: entity.value,
+                normalized_value: entity.normalizedValue.toLowerCase(),
+                mention_count: entity.mentions,
+              })
+              .select("id")
+              .single();
+
+            if (createError) {
+              console.error("Failed to create entity:", createError);
+              continue;
+            }
+            entityId = newEntity.id;
+          }
+
+          // Sync entity to Neo4j (for graph visualization and relationships)
+          // Validate entity type to prevent Cypher injection
+          if (!isValidEntityType(entity.type)) {
+            console.warn(`Invalid entity type: ${entity.type}, skipping Neo4j sync`);
+          } else {
+            const typeLabel = entity.type.charAt(0).toUpperCase() + entity.type.slice(1);
+            const now = new Date().toISOString();
+            try {
+              await runSingleQuery(
+                `
+              MERGE (e:Entity:${typeLabel} {user_id: $userId, normalized_value: $normalizedValue})
+              ON CREATE SET
+                e.id = $entityId,
+                e.display_value = $displayValue,
+                e.mention_count = $mentions,
+                e.confidence = 0.8,
+                e.is_user_created = false,
+                e.first_seen = datetime($now),
+                e.last_seen = datetime($now),
+                e.created_at = datetime($now)
+              ON MATCH SET
+                e.mention_count = e.mention_count + $mentions,
+                e.last_seen = datetime($now)
+              `,
+              {
+                userId: user.id,
+                entityId,
+                normalizedValue: entity.normalizedValue.toLowerCase(),
+                displayValue: entity.value,
+                mentions: entity.mentions,
+                now,
+              }
+            );
+          } catch (neo4jError) {
+              console.error("Failed to sync entity to Neo4j:", neo4jError);
+              // Continue - Supabase entity was created successfully
+            }
+          }
+
+          // Create entity mention for this session
+          await supabase.from("entity_mentions").insert({
+            entity_id: entityId,
+            session_id: sessionId,
+            context: entity.context,
+          });
+
+          extractedCount++;
+        }
+
+        console.log(`Auto-entities extracted: ${extractedCount} for session ${sessionId}`);
+
+        // Auto-extract relationships between entities (only if we have enough entities)
+        if (extractedCount >= 2) {
+          try {
+            // Get the entities we just extracted
+            const { data: entityMentions } = await supabase
+              .from("entity_mentions")
+              .select(`
+                entities (
+                  type,
+                  value,
+                  normalized_value
+                )
+              `)
+              .eq("session_id", sessionId);
+
+            const entities = (entityMentions || [])
+              .map((m) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const entity = (m.entities as any);
+                if (!entity) return null;
+                return {
+                  type: entity.type,
+                  value: entity.value,
+                  normalizedValue: entity.normalized_value,
+                };
+              })
+              .filter((e): e is NonNullable<typeof e> => e !== null);
+
+            if (entities.length >= 2) {
+              // Format transcript for relationship extraction
+              const formattedTranscript = result.segments
+                .map((seg) => `${seg.speaker}: ${seg.text}`)
+                .join("\n");
+
+              const relResult = await extractRelationships(
+                formattedTranscript,
+                entities,
+                result.language || "he"
+              );
+
+              // Save relationships - high confidence to Neo4j, low confidence as suggestions
+              const CONFIDENCE_THRESHOLD = 0.7;
+              let relSavedCount = 0;
+              let suggestionCount = 0;
+
+              for (const rel of relResult.relationships) {
+                // Validate relationship type to prevent Cypher injection
+                if (!isValidRelationshipType(rel.relationshipType)) {
+                  console.warn(`Invalid relationship type: ${rel.relationshipType}, skipping`);
+                  continue;
+                }
+
+                const confidence = rel.confidence ?? 0.8;
+
+                // High confidence relationships are auto-created in Neo4j
+                if (confidence >= CONFIDENCE_THRESHOLD) {
+                  try {
+                    const createResult = await runSingleQuery(
+                      `
+                      MATCH (source:Entity {user_id: $userId})
+                      WHERE toLower(source.normalized_value) = toLower($sourceNormalized)
+                         OR toLower(source.display_value) = toLower($sourceValue)
+                      MATCH (target:Entity {user_id: $userId})
+                      WHERE toLower(target.normalized_value) = toLower($targetNormalized)
+                         OR toLower(target.display_value) = toLower($targetValue)
+                      MERGE (source)-[r:${rel.relationshipType}]->(target)
+                      ON CREATE SET
+                        r.confidence = $confidence,
+                        r.context = $context,
+                        r.source = 'ai',
+                        r.session_id = $sessionId,
+                        r.created_at = datetime()
+                      RETURN source.id as sourceId, target.id as targetId
+                      `,
+                      {
+                        userId: user.id,
+                        sourceNormalized: rel.sourceValue.toLowerCase(),
+                        sourceValue: rel.sourceValue,
+                        targetNormalized: rel.targetValue.toLowerCase(),
+                        targetValue: rel.targetValue,
+                        confidence,
+                        context: rel.context,
+                        sessionId,
+                      }
+                    );
+
+                    if (createResult) {
+                      relSavedCount++;
+                    }
+                  } catch (relCreateError) {
+                    console.error("Failed to create relationship:", relCreateError);
+                  }
+                } else {
+                  // Low confidence relationships are saved as suggestions for user review
+                  try {
+                    // Look up entity IDs
+                    const { data: sourceEntity } = await supabase
+                      .from("entities")
+                      .select("id")
+                      .eq("user_id", user.id)
+                      .ilike("normalized_value", rel.sourceValue.toLowerCase())
+                      .single();
+
+                    const { data: targetEntity } = await supabase
+                      .from("entities")
+                      .select("id")
+                      .eq("user_id", user.id)
+                      .ilike("normalized_value", rel.targetValue.toLowerCase())
+                      .single();
+
+                    await supabase
+                      .from("relationship_suggestions")
+                      .insert({
+                        user_id: user.id,
+                        session_id: sessionId,
+                        source_entity_id: sourceEntity?.id || null,
+                        target_entity_id: targetEntity?.id || null,
+                        source_value: rel.sourceValue,
+                        target_value: rel.targetValue,
+                        source_type: rel.sourceType,
+                        target_type: rel.targetType,
+                        relationship_type: rel.relationshipType,
+                        confidence,
+                        context: rel.context,
+                        status: "pending",
+                      });
+
+                    suggestionCount++;
+                  } catch (suggestionError) {
+                    console.error("Failed to save relationship suggestion:", suggestionError);
+                  }
+                }
+              }
+
+              console.log(`Auto-relationships: ${relSavedCount} created, ${suggestionCount} suggestions for session ${sessionId}`);
+            }
+          } catch (relError) {
+            // Log but don't fail - relationships can be extracted manually later
+            console.error("Auto-relationship extraction failed:", relError);
+          }
+        }
+      } catch (entityError) {
+        // Log but don't fail - entities can be extracted manually later
+        console.error("Auto-entity extraction failed:", entityError);
+      }
+
+      // Calculate unique speaker count from segments
+      const uniqueSpeakers = new Set(result.segments.map((seg) => seg.speaker)).size;
+
+      // Update session status to completed with participant count
       await supabase
         .from("sessions")
-        .update({ status: "completed" })
+        .update({
+          status: "completed",
+          participant_count: uniqueSpeakers,
+        })
         .eq("id", sessionId);
 
       return NextResponse.json({

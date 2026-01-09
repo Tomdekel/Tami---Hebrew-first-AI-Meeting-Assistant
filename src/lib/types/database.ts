@@ -14,6 +14,7 @@ export interface Session {
   detected_language: Language | null;
   duration_seconds: number | null;
   transcription_job_id: string | null;
+  participant_count: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -116,6 +117,26 @@ export interface MemoryEmbedding {
   chunk_text: string;
   embedding: number[];
   created_at: string;
+}
+
+export type RelationshipSuggestionStatus = "pending" | "approved" | "rejected";
+
+export interface RelationshipSuggestion {
+  id: string;
+  user_id: string;
+  session_id: string;
+  source_entity_id: string | null;
+  target_entity_id: string | null;
+  source_value: string;
+  target_value: string;
+  source_type: string;
+  target_type: string;
+  relationship_type: string;
+  confidence: number;
+  context: string | null;
+  status: RelationshipSuggestionStatus;
+  created_at: string;
+  reviewed_at: string | null;
 }
 
 // Extended types with relations
