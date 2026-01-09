@@ -7,99 +7,80 @@ Tami-2 is a Hebrew-first meeting intelligence platform for recording, transcribi
 
 ---
 
-## Current Session Progress (January 7, 2026)
+## Current Session Progress (January 8, 2026)
 
-### Completed Tasks
+### Major Feature: Meeting Page 3-Column Redesign
 
-#### 1. Home Page Hebrew Translation
-- **Issue**: Mixed Hebrew/English text on landing page
-- **Fix**: Updated `src/app/page.tsx` to use translation keys instead of hardcoded English
-- **Files changed**:
-  - `src/app/page.tsx`
-  - `messages/he.json` (added home page translations)
-  - `messages/en.json` (added matching English keys)
+Completely redesigned the meeting detail page (`/meetings/[id]`) from a 2-column to 3-column layout based on user mockups.
 
-#### 2. System Audio Inline Explainer
-- **Issue**: No explanation for how system audio recording works
-- **Fix**: Added blue info card that appears when "שמע מערכת" mode is selected
-- **Files changed**:
-  - `src/components/recording/mode-selector.tsx` - Added inline explainer card
-  - `messages/he.json` - Added `systemAudio` section with step-by-step instructions
-  - `messages/en.json` - Added matching English translations
+#### New Layout Structure
 
-#### 3. Idle Waveform Animation
-- **Issue**: No audio visualization before recording starts
-- **Fix**: Created `IdleWaveform` component showing animated sine wave when mode is selected
-- **Files created/changed**:
-  - `src/components/recording/idle-waveform.tsx` (new)
-  - `src/components/recording/recorder.tsx` - Added idle waveform display
-  - `src/components/recording/index.ts` - Export new component
+**LEFT Column - Transcript:**
+- Transcript viewer with speaker color-coding
+- Search box to filter and highlight transcript segments
+- Click-to-seek functionality for jumping to timestamps
 
-#### 4. Recording Validation Error Fix
-- **Issue**: "Failed to analyze audio: Unable to decode audio data" when starting recording
-- **Root cause**: WebM/Opus files from MediaRecorder cannot be decoded by Web Audio API's `decodeAudioData`
-- **Fix**: Skip Web Audio validation for WebM files, use size-based validation instead
-- **Files changed**:
-  - `src/lib/audio.ts` - Added WebM detection and bypass in `validateAudioForSpeech()`
+**CENTER Column - Details:**
+- Audio player with playback controls
+- Editable summary panel (overview, key points, decisions)
+- Action items editor (add, edit, delete, toggle completion)
+- Q&A chat panel
 
-#### 5. Dashboard Header/Navigation Hebrew Translation
-- **Issue**: Dashboard header had hardcoded English strings ("Meetings", "New Meeting", "Sign In", etc.)
-- **Fix**: Updated dashboard layout and UserMenu component to use translation keys
-- **Files changed**:
-  - `src/app/(dashboard)/layout.tsx` - Added `useTranslations()`, replaced hardcoded strings
-  - `src/components/user-menu.tsx` - Added `useTranslations()`, replaced all hardcoded strings
-  - `messages/he.json` - Added `auth.profile`, `auth.signedOutSuccess`, `auth.signOutFailed`
-  - `messages/en.json` - Added matching English keys
+**RIGHT Column - Meetings Sidebar:**
+- Scrollable list of all user meetings
+- Search functionality to filter meetings
+- Status badges and language indicators
+- Highlights current meeting
 
-#### 6. Meetings List Page Hebrew Translation
-- **Issue**: Meetings list page had many hardcoded English strings (status labels, empty states, etc.)
-- **Fix**: Comprehensive translation of all user-facing strings
-- **Files changed**:
-  - `src/app/(dashboard)/meetings/page.tsx` - All strings now use translation keys
-  - `messages/he.json` - Added ~50 new translation keys for meetings
-  - `messages/en.json` - Added matching English keys
+#### Files Created
+1. `src/components/meetings-sidebar.tsx` - Right column meetings list with search
+2. `src/components/action-items-editor.tsx` - Full CRUD for action items
+3. `src/components/ui/scroll-area.tsx` - Radix UI scroll area component
 
-#### 7. Meeting Detail Page Hebrew Translation
-- **Issue**: Meeting detail page had extensive hardcoded English (dialogs, tabs, status messages, etc.)
-- **Fix**: Full translation coverage for all UI elements
-- **Files changed**:
-  - `src/app/(dashboard)/meetings/[id]/page.tsx` - All strings now use translation keys
-  - Includes: dialogs (delete, create tag, rename speaker), status messages, tab labels, empty states, form placeholders
+#### Files Modified
+- `src/app/(dashboard)/meetings/[id]/page.tsx` - Changed to 3-column grid layout
+- `src/components/transcript-viewer.tsx` - Added `searchQuery` prop with filtering/highlighting
+- `src/components/summary-panel.tsx` - Added edit mode for overview, key points, decisions
+- `src/app/api/sessions/[id]/summarize/route.ts` - Added PATCH endpoint for editing summaries
+- `src/app/page.tsx` - Added "My Meetings" button with orange styling and NEW badge
+- `messages/he.json` - Added `nav.myMeetings` translation
+- `messages/en.json` - Added `nav.myMeetings` translation
+- `package.json` - Added `@radix-ui/react-scroll-area` dependency
 
-#### 8. New Meeting Page UX Improvements
-- **Issues**:
-  - No place to add meeting context/description
-  - Upload required manual click after file selection
-  - Upload copy wasn't clear
-  - Recording button layout issues for RTL
-  - No hint when recording mode not selected
-- **Fixes**:
-  - Added "Meeting Context" field to both Record and Upload tabs
-  - Implemented auto-upload: file uploads automatically after selection
-  - Redesigned upload UI with drag-drop area and clearer copy
-  - Made Start Recording button larger and more prominent
-  - Added helpful hint text when no recording mode selected
-  - Used flex-row-reverse for RTL-friendly button layout
-  - Added stream check for waveform display
-- **Files changed**:
-  - `src/app/(dashboard)/meetings/new/page.tsx` - Major refactor with context field and auto-upload
-  - `src/components/recording/recorder.tsx` - Improved button layout and visibility
-  - `messages/he.json` - Added upload context and recording hint translations
-  - `messages/en.json` - Added matching English translations
+### Features Implemented
 
-#### 9. Meeting Detail Page Status Badge Translation
-- **Issue**: Status badge showed "failed" in English instead of Hebrew "נכשל"
-- **Fix**: Changed `{session.status}` to use translation keys for each status
-- **Files changed**:
-  - `src/app/(dashboard)/meetings/[id]/page.tsx` - Status badge now uses `t("meeting.completed")`, `t("meeting.failed")`, etc.
+1. **Transcript Search**
+   - Search input above transcript
+   - Filters segments containing search term
+   - Highlights matching text with yellow background
+   - Shows "No matches" message when no results
 
-#### 10. Login Page Hebrew Translation
-- **Issue**: Login page had hardcoded English strings ("Tami", "Sign in to your account", "Don't have an account?")
-- **Fix**: Full translation of all login page text and toast messages
-- **Files changed**:
-  - `src/app/(auth)/login/page.tsx` - All strings now use translation keys
-  - `messages/he.json` - Added `brand`, `auth.signInDescription`, `auth.noAccount`, `auth.signInSuccess`, `auth.signInFailed`, `auth.invalidCredentials`, `auth.googleSignInFailed`, `auth.unknownError`
-  - `messages/en.json` - Added matching English keys
+2. **Editable Summary**
+   - Pencil icon to enter edit mode
+   - Textarea for overview editing
+   - Add/remove key points
+   - Add/remove decisions
+   - Save/Cancel buttons
+   - PATCH API endpoint at `/api/sessions/[id]/summarize`
+
+3. **Action Items Editor**
+   - Toggle completion with checkbox
+   - Inline editing of descriptions
+   - Add new action items with input field
+   - Delete items with trash icon
+   - Optimistic updates for smooth UX
+
+4. **Meetings Sidebar**
+   - Fetches all user sessions
+   - Search to filter by title
+   - Shows status, date, language, duration
+   - Current meeting highlighted with primary color
+   - Click to navigate to different meeting
+
+5. **Home Page "My Meetings" Button**
+   - Orange button with calendar icon
+   - "NEW" badge to draw attention
+   - Links to `/meetings` page
 
 ---
 
@@ -115,7 +96,7 @@ src/
 ├── components/
 │   ├── ui/                # shadcn/ui components
 │   └── recording/         # Recorder, Waveform, ModeSelector
-├── hooks/                 # Custom hooks (use-recording, use-waveform, etc.)
+├── hooks/                 # Custom hooks (use-recording, use-session, etc.)
 ├── lib/
 │   ├── supabase/          # Supabase clients
 │   └── audio.ts           # Audio upload/validation utilities
@@ -144,64 +125,66 @@ messages/
 ## Known Issues / Tech Debt
 
 1. **Middleware deprecation warning**: Next.js 16 warns about "middleware" convention, suggests using "proxy"
-2. **M4A file uploads**: May fail validation in some browsers (workaround: convert to MP3)
+2. **No git remote configured**: Commits are local only, deployment via `vercel --prod` CLI
+3. **Mobile responsiveness**: 3-column layout hides right sidebar on mobile - may need mobile-friendly alternative
 
 ---
 
-## Next Steps / Potential Improvements
+## Potential Next Steps
 
 ### High Priority
-- [x] Fix remaining English strings in dashboard header/navigation (COMPLETED)
-- [x] Add Hebrew translations for dashboard pages (meetings list, meeting detail) (COMPLETED)
-- [x] Fix status badge translation on meeting detail page (COMPLETED)
-- [x] Add Hebrew translations for login page (COMPLETED)
-- [ ] Test recording flow end-to-end with actual microphone
+- [ ] Add mobile-friendly way to access meetings list (drawer/modal)
+- [ ] Add speaker name editing UI (infrastructure exists in TranscriptViewer editMode)
+- [ ] Test full flow: record -> transcribe -> summarize -> edit
 
 ### Medium Priority
-- [ ] Add upload progress indicator for large files
-- [ ] Implement drag-and-drop file upload
-- [ ] Add recording quality indicator (audio levels)
+- [ ] Real-time sync for collaborative editing
+- [ ] Auto-generate summary when transcription completes
+- [ ] Add keyboard shortcuts for transcript search, panel navigation
 
 ### Low Priority
-- [ ] Add dark mode support
-- [ ] Implement keyboard shortcuts for recording controls
-- [ ] Add export functionality (transcript as text/PDF)
+- [ ] Migrate middleware to "proxy" convention
+- [ ] Set up git remote for version control
+- [ ] Add dark mode toggle
 
 ---
 
-## Testing
-
-### Test Account
-- **Email**: tom@test.com
-- **Password**: Test123!
-
-### E2E Test Coverage (Completed)
-- Authentication flow (login/logout)
-- Meeting list page
-- Audio upload flow
-- Meeting detail page with tabs
-- Summary generation
-- Chat/Q&A feature
-- Session deletion
-
----
-
-## Deployment
+## Key Commands
 
 ```bash
-# Deploy to Vercel
-vercel deploy --prod
-
 # Local development
 npm run dev
 
-# Build
+# Build (TypeScript check)
 npm run build
+
+# Deploy to Vercel
+vercel --prod
+
+# Check deployment logs
+vercel logs <deployment-url>
 ```
 
-**Environment Variables Required**:
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `OPENAI_API_KEY`
-- `IVRIT_API_KEY`
-- `IVRIT_ENDPOINT_ID`
+---
+
+## Important Files Reference
+
+| File | Purpose |
+|------|---------|
+| `src/app/(dashboard)/meetings/[id]/page.tsx` | Meeting detail page (3-column layout) |
+| `src/components/transcript-viewer.tsx` | Transcript display with search |
+| `src/components/summary-panel.tsx` | Editable summary component |
+| `src/components/action-items-editor.tsx` | Action items CRUD |
+| `src/components/meetings-sidebar.tsx` | Meetings list sidebar |
+| `src/hooks/use-session.ts` | Session data fetching hook |
+| `src/app/api/sessions/[id]/summarize/route.ts` | Summary API (GET, POST, PATCH) |
+| `src/app/api/sessions/[id]/action-items/route.ts` | Action items API |
+| `messages/he.json` | Hebrew translations |
+| `messages/en.json` | English translations |
+
+---
+
+## Last Deployment
+- **Date**: January 8, 2026
+- **URL**: https://tami-2.vercel.app
+- **Commit**: "Redesign meeting page with 3-column layout"

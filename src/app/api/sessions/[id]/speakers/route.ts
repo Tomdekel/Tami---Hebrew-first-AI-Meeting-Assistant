@@ -214,6 +214,30 @@ export async function POST(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "No transcript found" }, { status: 400 });
     }
 
+    // Verify both speaker IDs exist in this transcript
+    const { data: sourceExists } = await supabase
+      .from("transcript_segments")
+      .select("speaker_id")
+      .eq("transcript_id", transcriptId)
+      .eq("speaker_id", sourceSpeakerId)
+      .limit(1)
+      .maybeSingle();
+
+    const { data: targetExists } = await supabase
+      .from("transcript_segments")
+      .select("speaker_id")
+      .eq("transcript_id", transcriptId)
+      .eq("speaker_id", targetSpeakerId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!sourceExists || !targetExists) {
+      return NextResponse.json(
+        { error: "Invalid speaker IDs - speakers not found in this transcript" },
+        { status: 400 }
+      );
+    }
+
     // Merge: Update all source speaker segments to target speaker
     const updateData: { speaker_id: string; speaker_name?: string } = {
       speaker_id: targetSpeakerId,

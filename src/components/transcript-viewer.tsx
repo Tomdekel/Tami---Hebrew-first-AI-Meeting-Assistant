@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TranscriptSegment {
@@ -27,6 +28,8 @@ interface TranscriptViewerProps {
   onSelectionChange?: (selected: Set<number>) => void;
   /** Search query to filter and highlight segments */
   searchQuery?: string;
+  /** Called when user wants to edit a speaker name */
+  onEditSpeaker?: (speakerId: string, currentName: string) => void;
 }
 
 // Timestamp interval in seconds (show timestamp markers every 30 seconds)
@@ -61,6 +64,7 @@ export function TranscriptViewer({
   selectedSegments = new Set(),
   onSelectionChange,
   searchQuery = "",
+  onEditSpeaker,
 }: TranscriptViewerProps) {
   const [activeParagraphKey, setActiveParagraphKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -289,7 +293,7 @@ export function TranscriptViewer({
             )}
           >
             {/* Speaker Name with optional group selection */}
-            <div className="font-medium text-sm mb-3 text-muted-foreground flex items-center gap-2">
+            <div className="font-medium text-sm mb-3 text-muted-foreground flex items-center gap-2 group/speaker">
               {editMode && (
                 <button
                   type="button"
@@ -323,6 +327,19 @@ export function TranscriptViewer({
                 </button>
               )}
               {group.speakerName}
+              {onEditSpeaker && !editMode && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditSpeaker(group.speakerId, group.speakerName);
+                  }}
+                  className="opacity-0 group-hover/speaker:opacity-100 transition-opacity p-1 rounded hover:bg-foreground/10"
+                  title="Edit speaker name"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
             </div>
 
             {/* Edit mode: Show individual segments */}

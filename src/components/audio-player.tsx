@@ -163,8 +163,8 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
       <audio ref={audioRef} src={src} preload="metadata" />
 
       <div className="space-y-4">
-        {/* Progress Bar */}
-        <div className="space-y-2">
+        {/* Progress Bar - force LTR so timeline goes left-to-right */}
+        <div className="space-y-2" dir="ltr">
           <Slider
             value={[currentTime]}
             max={duration || 100}
@@ -241,8 +241,8 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
             </Button>
           </div>
 
-          {/* Right: Volume */}
-          <div className="flex items-center gap-2">
+          {/* Right: Volume - also LTR for slider consistency */}
+          <div className="flex items-center gap-2" dir="ltr">
             <Button
               variant="ghost"
               size="icon"

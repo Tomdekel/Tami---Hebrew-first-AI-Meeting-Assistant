@@ -8,8 +8,6 @@ import {
   ChevronDown,
   ChevronUp,
   CheckCircle2,
-  CheckSquare,
-  Square,
   Pencil,
   Save,
   X,
@@ -58,10 +56,6 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
   const t = useTranslations();
   const [isOpen, setIsOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [localActionItems, setLocalActionItems] = useState<ActionItem[]>(
-    summary?.action_items || []
-  );
-
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -71,7 +65,6 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
 
   // Sync local state when summary prop changes
   useEffect(() => {
-    setLocalActionItems(summary?.action_items || []);
     setEditedOverview(summary?.overview || "");
     setEditedKeyPoints(summary?.key_points || []);
     setEditedDecisions(summary?.decisions || []);
@@ -168,28 +161,6 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
       });
     } finally {
       setIsGenerating(false);
-    }
-  };
-
-  const handleToggleActionItem = async (actionItemId: string, completed: boolean) => {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/action-items/${actionItemId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ completed }),
-      });
-
-      if (!response.ok) throw new Error("Failed to update action item");
-
-      setLocalActionItems((prev) =>
-        prev.map((item) =>
-          item.id === actionItemId ? { ...item, completed } : item
-        )
-      );
-
-      toast.success(completed ? "Action item completed" : "Action item uncompleted");
-    } catch {
-      toast.error("Failed to update action item");
     }
   };
 
@@ -393,39 +364,7 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
                   </div>
                 )}
 
-                {/* Action Items */}
-                {localActionItems.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-medium text-muted-foreground mb-1">
-                      {t("meeting.actions")}
-                    </h4>
-                    <ul className="space-y-1">
-                      {localActionItems.slice(0, 5).map((item) => (
-                        <li key={item.id} className="flex items-start gap-2 text-sm">
-                          <button
-                            onClick={() => handleToggleActionItem(item.id, !item.completed)}
-                            className="mt-0.5 text-muted-foreground hover:text-foreground"
-                          >
-                            {item.completed ? (
-                              <CheckSquare className="h-4 w-4 text-green-500" />
-                            ) : (
-                              <Square className="h-4 w-4" />
-                            )}
-                          </button>
-                          <span className={item.completed ? "line-through text-muted-foreground" : ""}>
-                            {item.description}
-                          </span>
-                        </li>
-                      ))}
-                      {localActionItems.length > 5 && (
-                        <li className="text-xs text-muted-foreground">
-                          +{localActionItems.length - 5} more...
-                        </li>
-                      )}
-                    </ul>
-                  </div>
-                )}
-              </>
+                              </>
             ) : (
               <div className="text-center py-4">
                 <p className="text-sm text-muted-foreground mb-3">

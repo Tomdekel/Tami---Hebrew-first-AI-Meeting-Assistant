@@ -21,7 +21,7 @@ interface ChatPanelProps {
 
 export function ChatPanel({ sessionId, isProcessing = false }: ChatPanelProps) {
   const t = useTranslations();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
