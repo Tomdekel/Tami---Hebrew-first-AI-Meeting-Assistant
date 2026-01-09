@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useRef } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { FileText, Upload, X, File, ImageIcon, FileSpreadsheet, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -33,7 +33,7 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i]
 }
 
-const formatRelativeTime = (dateString: string): string => {
+const formatRelativeTime = (dateString: string, locale: string, t: (key: string, values?: Record<string, string | number>) => string): string => {
   const date = new Date(dateString)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -41,11 +41,11 @@ const formatRelativeTime = (dateString: string): string => {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMins < 1) return "עכשיו"
-  if (diffMins < 60) return `לפני ${diffMins} דקות`
-  if (diffHours < 24) return `לפני ${diffHours === 1 ? "שעה" : diffHours + " שעות"}`
-  if (diffDays < 7) return `לפני ${diffDays === 1 ? "יום" : diffDays + " ימים"}`
-  return date.toLocaleDateString("he-IL")
+  if (diffMins < 1) return t("time.now")
+  if (diffMins < 60) return t("time.minutesAgo", { count: diffMins })
+  if (diffHours < 24) return t("time.hoursAgo", { count: diffHours })
+  if (diffDays < 7) return t("time.daysAgo", { count: diffDays })
+  return date.toLocaleDateString(locale === "he" ? "he-IL" : "en-US")
 }
 
 const getDocIcon = (fileType: string) => {
@@ -68,6 +68,7 @@ export function DocumentsPanel({
   isLoading = false,
 }: DocumentsPanelProps) {
   const t = useTranslations()
+  const locale = useLocale()
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   // Use ref to track latest attachments to avoid stale closure
@@ -91,7 +92,7 @@ export function DocumentsPanel({
       for (const file of files) {
         // Validate file size
         if (file.size > MAX_FILE_SIZE) {
-          toast.error(`${file.name} גדול מדי (מקסימום 100MB)`)
+          toast.error(t("upload.fileTooLarge", { name: file.name }))
           continue
         }
 
@@ -105,13 +106,13 @@ export function DocumentsPanel({
 
         if (!response.ok) {
           const data = await response.json()
-          toast.error(`${file.name}: ${data.error || "העלאה נכשלה"}`)
+          toast.error(`${file.name}: ${data.error || t("upload.failed")}`)
           continue
         }
 
         const data = await response.json()
         uploadedAttachments.push(data.attachment)
-        toast.success(`${file.name} הועלה בהצלחה`)
+        toast.success(t("upload.fileUploaded", { name: file.name }))
       }
 
       // Update attachments with all newly uploaded files using ref for fresh state
@@ -165,7 +166,7 @@ export function DocumentsPanel({
         onAttachmentsChange(attachments.filter((a) => a.id !== id))
       }
 
-      toast.success("הקובץ נמחק")
+      toast.success(t("upload.deleted"))
     } catch (error) {
       console.error("Delete error:", error)
       toast.error(t("common.error"))
@@ -199,7 +200,7 @@ export function DocumentsPanel({
           <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
         )}
         <p className="text-sm text-muted-foreground mb-2">
-          {isUploading ? "מעלה..." : "גרור קבצים לכאן או"}
+          {isUploading ? t("upload.uploading") : t("upload.dragHereOr")}
         </p>
         <label>
           <input
@@ -211,10 +212,10 @@ export function DocumentsPanel({
             accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp"
           />
           <Button variant="outline" size="sm" disabled={isUploading} asChild>
-            <span className="cursor-pointer">בחר קבצים</span>
+            <span className="cursor-pointer">{t("upload.selectFiles")}</span>
           </Button>
         </label>
-        <p className="text-xs text-muted-foreground mt-2">PDF, תמונות, מסמכים עד 100MB</p>
+        <p className="text-xs text-muted-foreground mt-2">{t("upload.attachmentFormats")}</p>
       </div>
 
       {/* Documents List */}
@@ -244,7 +245,7 @@ export function DocumentsPanel({
                   {doc.name}
                 </a>
                 <p className="text-xs text-muted-foreground">
-                  {formatFileSize(doc.fileSize)} • {formatRelativeTime(doc.createdAt)}
+                  {formatFileSize(doc.fileSize)} • {formatRelativeTime(doc.createdAt, locale, t)}
                 </p>
               </div>
               <Button

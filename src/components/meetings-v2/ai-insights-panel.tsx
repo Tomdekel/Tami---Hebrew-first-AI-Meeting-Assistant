@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -73,6 +73,21 @@ export function AIInsightsPanel({
   onRefresh,
 }: AIInsightsPanelProps) {
   const t = useTranslations()
+  const locale = useLocale()
+
+  // Format deadline date based on locale
+  const formatDeadline = (dateString: string): string => {
+    try {
+      const date = new Date(dateString)
+      return date.toLocaleDateString(locale === "he" ? "he-IL" : "en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    } catch {
+      return dateString
+    }
+  }
 
   // Decision editing state
   const [editingDecisionIndex, setEditingDecisionIndex] = useState<number | null>(null)
@@ -300,7 +315,7 @@ export function AIInsightsPanel({
   const handleDeleteSpeaker = async (speakerId: string) => {
     // Note: In tami-2, we don't actually delete speakers, we just merge them
     // This is a placeholder - you might want to implement differently
-    toast.error("לא ניתן למחוק דובר - ניתן רק למזג")
+    toast.error(t("speakers.cannotDeleteOnlyMerge"))
   }
 
   const handleMergeSpeakers = async () => {
@@ -386,7 +401,7 @@ export function AIInsightsPanel({
               value="speakers"
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent px-3 py-3 text-sm whitespace-nowrap"
             >
-              <Users className="w-4 h-4 ml-1" />
+              <Users className="w-4 h-4 ml-1 flex-shrink-0" />
               {t("meeting.speakers")}
             </TabsTrigger>
           </TabsList>
@@ -480,7 +495,7 @@ export function AIInsightsPanel({
 
               {decisions.length === 0 && !showNewDecision && (
                 <div className="text-center py-4">
-                  <p className="text-muted-foreground text-sm mb-2">אין החלטות עדיין</p>
+                  <p className="text-muted-foreground text-sm mb-2">{t("meeting.noDecisionsYet")}</p>
                 </div>
               )}
 
@@ -489,7 +504,7 @@ export function AIInsightsPanel({
                   <Input
                     value={newDecision}
                     onChange={(e) => setNewDecision(e.target.value)}
-                    placeholder="הוסף החלטה חדשה..."
+                    placeholder={t("meeting.addNewDecisionPlaceholder")}
                     className="flex-1 text-sm"
                     autoFocus
                     onKeyDown={(e) => {
@@ -498,7 +513,7 @@ export function AIInsightsPanel({
                     }}
                   />
                   <Button size="sm" onClick={handleAddDecision}>
-                    הוסף
+                    {t("common.add")}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setShowNewDecision(false)}>
                     {t("common.cancel")}
@@ -511,7 +526,7 @@ export function AIInsightsPanel({
                   onClick={() => setShowNewDecision(true)}
                 >
                   <Plus className="w-4 h-4" />
-                  הוסף החלטה
+                  {t("meeting.addDecision")}
                 </Button>
               )}
             </div>
@@ -532,14 +547,14 @@ export function AIInsightsPanel({
                       <Input
                         value={editingTask.description || ""}
                         onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
-                        placeholder="משימה"
+                        placeholder={t("meeting.taskPlaceholder")}
                         className="text-sm"
                       />
                       <div className="flex gap-2">
                         <Input
                           value={editingTask.assignee || ""}
                           onChange={(e) => setEditingTask({ ...editingTask, assignee: e.target.value })}
-                          placeholder="אחראי"
+                          placeholder={t("meeting.assigneePlaceholder")}
                           className="text-sm flex-1"
                         />
                         <Input
@@ -584,7 +599,7 @@ export function AIInsightsPanel({
                           {task.deadline && (
                             <span className="flex items-center gap-1" dir="ltr">
                               <Calendar className="w-3 h-3" />
-                              {task.deadline}
+                              {formatDeadline(task.deadline)}
                             </span>
                           )}
                         </div>
@@ -609,7 +624,7 @@ export function AIInsightsPanel({
 
               {actionItems.length === 0 && !showNewTask && (
                 <div className="text-center py-4">
-                  <p className="text-muted-foreground text-sm mb-2">אין משימות עדיין</p>
+                  <p className="text-muted-foreground text-sm mb-2">{t("meeting.noTasksYet")}</p>
                 </div>
               )}
 
@@ -618,7 +633,7 @@ export function AIInsightsPanel({
                   <Input
                     value={newTask.description}
                     onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                    placeholder="משימה חדשה"
+                    placeholder={t("meeting.newTaskPlaceholder")}
                     className="text-sm"
                     autoFocus
                   />
@@ -626,7 +641,7 @@ export function AIInsightsPanel({
                     <Input
                       value={newTask.assignee}
                       onChange={(e) => setNewTask({ ...newTask, assignee: e.target.value })}
-                      placeholder="אחראי"
+                      placeholder={t("meeting.assigneePlaceholder")}
                       className="text-sm flex-1"
                     />
                     <Input
@@ -639,7 +654,7 @@ export function AIInsightsPanel({
                   </div>
                   <div className="flex gap-2 justify-end">
                     <Button size="sm" onClick={handleAddTask} disabled={savingTask}>
-                      הוסף
+                      {t("common.add")}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setShowNewTask(false)}>
                       {t("common.cancel")}
@@ -649,7 +664,7 @@ export function AIInsightsPanel({
               ) : (
                 <Button variant="outline" className="w-full gap-2 bg-transparent" onClick={() => setShowNewTask(true)}>
                   <Plus className="w-4 h-4" />
-                  הוסף משימה
+                  {t("meeting.addTask")}
                 </Button>
               )}
             </div>
@@ -716,13 +731,13 @@ export function AIInsightsPanel({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
                             <Pencil className="w-4 h-4 ml-2" />
-                            שנה שם
+                            {t("speakers.rename")}
                           </DropdownMenuItem>
                           {speakers.length > 1 && (
                             <DropdownMenuSub>
                               <DropdownMenuSubTrigger>
                                 <GitMerge className="w-4 h-4 ml-2" />
-                                מזג עם דובר אחר
+                                {t("speakers.mergeWith")}
                               </DropdownMenuSubTrigger>
                               <DropdownMenuSubContent>
                                 {speakers
@@ -748,7 +763,7 @@ export function AIInsightsPanel({
                             className="text-red-600 focus:text-red-600"
                           >
                             <Trash2 className="w-4 h-4 ml-2" />
-                            מחק דובר
+                            {t("speakers.deleteSpeaker")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -765,10 +780,12 @@ export function AIInsightsPanel({
       <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>מיזוג דוברים</DialogTitle>
+            <DialogTitle>{t("speakers.mergeSpeakers")}</DialogTitle>
             <DialogDescription>
-              כל ההופעות של &quot;{mergeSource?.speakerName}&quot; ימוזגו לתוך &quot;
-              {speakers.find((s) => s.speakerId === mergeTarget)?.speakerName}&quot;. פעולה זו אינה ניתנת לביטול.
+              {t("speakers.mergeDescription", {
+                source: mergeSource?.speakerName || "",
+                target: speakers.find((s) => s.speakerId === mergeTarget)?.speakerName || ""
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -780,7 +797,7 @@ export function AIInsightsPanel({
               disabled={isMerging}
               className="bg-teal-600 hover:bg-teal-700"
             >
-              {isMerging ? t("common.loading") : "מזג"}
+              {isMerging ? t("common.loading") : t("speakers.merge")}
             </Button>
           </DialogFooter>
         </DialogContent>

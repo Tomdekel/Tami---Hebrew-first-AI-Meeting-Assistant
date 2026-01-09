@@ -1,11 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Search, Calendar, Clock, Users } from "lucide-react"
+import { Search, Calendar, Clock, Users, Loader2, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types/database"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 
 interface MeetingsSidebarProps {
   sessions: Session[]
@@ -17,6 +18,8 @@ interface MeetingsSidebarProps {
 export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: MeetingsSidebarProps) {
   const [search, setSearch] = useState("")
   const t = useTranslations()
+  const locale = useLocale()
+  const isRTL = locale === "he"
 
   const filteredSessions = sessions.filter((s) =>
     s.title?.toLowerCase().includes(search.toLowerCase())
@@ -25,22 +28,22 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
   const formatDuration = (durationSeconds: number | null | undefined): string => {
     if (!durationSeconds) return ""
     const minutes = Math.round(durationSeconds / 60)
-    if (minutes < 60) return `${minutes} דקות`
+    if (minutes < 60) return `${minutes}m`
     const hours = Math.floor(minutes / 60)
     const remainingMinutes = minutes % 60
-    return remainingMinutes > 0 ? `${hours}:${remainingMinutes.toString().padStart(2, "0")} שעות` : `${hours} שעות`
+    return remainingMinutes > 0 ? `${hours}:${remainingMinutes.toString().padStart(2, "0")}h` : `${hours}h`
   }
 
   const formatDate = (dateStr: string | null | undefined): string => {
     if (!dateStr) return ""
     const date = new Date(dateStr)
-    return date.toLocaleDateString("he-IL", { day: "numeric", month: "numeric", year: "numeric" })
+    return date.toLocaleDateString(isRTL ? "he-IL" : "en-US", { day: "numeric", month: "numeric", year: "numeric" })
   }
 
-  const getParticipantCount = (_session: Session): number => {
-    // Session type doesn't include nested transcript in list view
-    // Return 1 as placeholder - actual count is fetched when meeting is opened
-    return 1
+  const getParticipantCount = (session: Session): number | null => {
+    // Use participant_count if available (populated after transcription)
+    // Otherwise return null to hide the field
+    return session.participant_count ?? null
   }
 
   return (
@@ -48,12 +51,12 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
       {/* Search */}
       <div className="p-4 border-b border-border">
         <div className="relative">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search className={`absolute ${isRTL ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground`} />
           <Input
-            placeholder="חיפוש פגישות..."
+            placeholder={t("search.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pr-9 bg-white"
+            className={`${isRTL ? "pr-9" : "pl-9"} bg-white`}
           />
         </div>
       </div>
@@ -71,41 +74,63 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
             ))
           ) : filteredSessions.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">
-              {search ? "לא נמצאו פגישות" : "אין פגישות עדיין"}
+              {search ? t("common.noResults") : t("meeting.noMeetingsYet")}
             </div>
           ) : (
-            filteredSessions.map((session) => (
-              <button
-                key={session.id}
-                onClick={() => onSelect(session.id)}
-                className={cn(
-                  "w-full text-right p-3 rounded-lg transition-colors",
-                  selectedId === session.id ? "bg-teal-50 border border-teal-200" : "hover:bg-muted"
-                )}
-              >
-                <h4 className="font-medium text-sm text-foreground truncate">
-                  {session.title || t("meeting.untitled")}
-                </h4>
-                <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                  {session.created_at && (
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {formatDate(session.created_at)}
-                    </span>
+            filteredSessions.map((session) => {
+              const participantCount = getParticipantCount(session)
+              const isProcessing = session.status === "processing" || session.status === "refining"
+              const isFailed = session.status === "failed"
+
+              return (
+                <button
+                  key={session.id}
+                  onClick={() => onSelect(session.id)}
+                  className={cn(
+                    "w-full text-right p-3 rounded-lg transition-colors",
+                    selectedId === session.id ? "bg-teal-50 border border-teal-200" : "hover:bg-muted"
                   )}
-                  {session.duration_seconds && (
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatDuration(session.duration_seconds)}
-                    </span>
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="font-medium text-sm text-foreground truncate flex-1">
+                      {session.title || t("meeting.untitled")}
+                    </h4>
+                    {isProcessing && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 gap-1 flex-shrink-0">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {session.status === "processing" ? t("meeting.transcribing") : t("meeting.refining")}
+                      </Badge>
+                    )}
+                    {isFailed && (
+                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0 gap-1 flex-shrink-0">
+                        <AlertCircle className="h-3 w-3" />
+                        {t("meeting.failed")}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                    {session.created_at && (
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {formatDate(session.created_at)}
+                      </span>
+                    )}
+                    {session.duration_seconds && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatDuration(session.duration_seconds)}
+                      </span>
+                    )}
+                  </div>
+                  {participantCount !== null && participantCount > 0 && (
+                    <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
+                      <Users className="w-3 h-3" />
+                      <span>{participantCount} {t("meeting.participants")}</span>
+                    </div>
                   )}
-                </div>
-                <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
-                  <Users className="w-3 h-3" />
-                  <span>{getParticipantCount(session)} משתתפים</span>
-                </div>
-              </button>
-            ))
+                </button>
+              )
+            })
           )}
         </div>
       </div>

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { User, LogOut, Loader2 } from "lucide-react";
+import { User, LogOut, Loader2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -84,17 +84,21 @@ export function UserMenu() {
 
   const avatarUrl = user.user_metadata?.avatar_url;
 
+  const displayName = user.user_metadata?.full_name || user.email?.split("@")[0];
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-9 w-9 rounded-full">
-          <Avatar className="h-9 w-9">
+        <Button variant="ghost" className="gap-2 px-2">
+          <Avatar className="h-8 w-8">
             {avatarUrl && <AvatarImage src={avatarUrl} alt={user.email || "User"} />}
-            <AvatarFallback>{initials}</AvatarFallback>
+            <AvatarFallback className="bg-teal-100 text-teal-700 text-sm">{initials}</AvatarFallback>
           </Avatar>
+          <span className="text-sm font-medium hidden sm:inline-block">{displayName}</span>
+          <ChevronDown className="w-4 h-4 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end" forceMount>
+      <DropdownMenuContent className="w-56" align="start" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
             <p className="text-sm font-medium leading-none">

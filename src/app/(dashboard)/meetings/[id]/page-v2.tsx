@@ -1,7 +1,7 @@
 "use client"
 
 import { use, useState, useCallback, useEffect } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -70,18 +70,18 @@ function formatDuration(seconds: number | null): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`
 }
 
-function formatDate(dateString: string): string {
+function formatDate(dateString: string, locale: string = "he"): string {
   const date = new Date(dateString)
-  return date.toLocaleDateString("he-IL", {
+  return date.toLocaleDateString(locale === "he" ? "he-IL" : "en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
   })
 }
 
-function formatTime(dateString: string): string {
+function formatTime(dateString: string, locale: string = "he"): string {
   const date = new Date(dateString)
-  return date.toLocaleTimeString("he-IL", {
+  return date.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", {
     hour: "2-digit",
     minute: "2-digit",
   })
@@ -99,6 +99,7 @@ export default function MeetingDetailPageV2Wrapper({ params }: PageProps) {
 function MeetingDetailPageV2Content({ params }: PageProps) {
   const { id } = use(params)
   const t = useTranslations()
+  const locale = useLocale()
   const router = useRouter()
   const audioPlayer = useAudioPlayer()
   const { session, isLoading, error, refetch } = useSession(id, { pollWhileProcessing: true })
@@ -414,9 +415,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 {formatDuration(session.duration_seconds)}
               </span>
               <span>·</span>
-              <span>{formatTime(session.created_at)}</span>
+              <span>{formatTime(session.created_at, locale)}</span>
               <span>·</span>
-              <span>{formatDate(session.created_at)}</span>
+              <span>{formatDate(session.created_at, locale)}</span>
               <span>·</span>
               <span className="flex items-center gap-1">
                 <Users className="h-4 w-4" />
@@ -444,19 +445,19 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setChatOpen(true)} aria-label="פתח צ'אט">
+            <Button variant="outline" size="sm" onClick={() => setChatOpen(true)} aria-label={t("meeting.openChat")}>
               <MessageSquare className="h-4 w-4 me-1" />
-              צ׳אט
+              {t("meeting.chat")}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setDocsOpen(true)} aria-label="פתח מסמכים">
+            <Button variant="outline" size="sm" onClick={() => setDocsOpen(true)} aria-label={t("meeting.openDocuments")}>
               <FileText className="h-4 w-4 me-1" />
-              מסמכים
+              {t("meeting.documents")}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={isExporting} aria-label="הורד קובץ">
+                <Button variant="outline" size="sm" disabled={isExporting} aria-label={t("meeting.downloadFile")}>
                   <Download className="h-4 w-4 me-1" />
-                  הורד
+                  {t("meeting.download")}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -590,7 +591,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
           <SheetHeader className="p-4 border-b">
             <SheetTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              מסמכים מצורפים
+              {t("meeting.attachedDocuments")}
             </SheetTitle>
           </SheetHeader>
           <div className="h-[calc(100vh-80px)]">

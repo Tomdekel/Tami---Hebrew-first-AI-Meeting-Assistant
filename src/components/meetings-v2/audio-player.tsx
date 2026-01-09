@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import {
@@ -23,6 +24,7 @@ interface AudioPlayerProps {
 }
 
 export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) {
+  const t = useTranslations()
   const audioRef = useRef<HTMLAudioElement>(null)
   const audioPlayerContext = useAudioPlayerOptional()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -152,7 +154,7 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
             className="h-8 w-8 p-0"
             onClick={skipBackward}
             disabled={!isLoaded}
-            aria-label="15 שניות אחורה"
+            aria-label={t("audio.skipBack15")}
           >
             <RotateCcw className="h-4 w-4" />
           </Button>
@@ -160,7 +162,7 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
             onClick={togglePlay}
             className="h-10 w-10 rounded-full bg-teal-600 hover:bg-teal-700 p-0"
             disabled={!isLoaded}
-            aria-label={isPlaying ? "השהה" : "נגן"}
+            aria-label={isPlaying ? t("audio.pause") : t("audio.play")}
           >
             {isPlaying ? (
               <Pause className="h-4 w-4 text-white" />
@@ -174,14 +176,14 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
             className="h-8 w-8 p-0"
             onClick={skipForward}
             disabled={!isLoaded}
-            aria-label="15 שניות קדימה"
+            aria-label={t("audio.skipForward15")}
           >
             <RotateCw className="h-4 w-4" />
           </Button>
         </div>
 
         {/* Current Time (shows progress) */}
-        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label="זמן נוכחי">
+        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.currentTime")}>
           {formatTime(currentTime)}
         </span>
 
@@ -194,19 +196,19 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
             onValueChange={handleSeek}
             disabled={!isLoaded}
             className="cursor-pointer"
-            aria-label="התקדמות השמעה"
+            aria-label={t("audio.progress")}
           />
         </div>
 
         {/* Duration (total time) */}
-        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label="משך כולל">
+        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.duration")}>
           {formatTime(duration)}
         </span>
 
         {/* Speed Control */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" aria-label={`מהירות נגינה: ${playbackSpeed}x`}>
+            <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" aria-label={t("audio.playbackSpeed", { speed: playbackSpeed })}>
               <Gauge className="h-4 w-4" />
               <span className="text-xs font-mono">{playbackSpeed}x</span>
             </Button>
@@ -231,7 +233,7 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
             size="sm"
             className="h-8 w-8 p-0"
             onClick={() => setIsMuted(!isMuted)}
-            aria-label={isMuted ? "בטל השתקה" : "השתק"}
+            aria-label={isMuted ? t("audio.unmute") : t("audio.mute")}
           >
             {isMuted || volume === 0 ? (
               <VolumeX className="h-4 w-4" />
@@ -248,7 +250,7 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
               setIsMuted(false)
             }}
             className="w-20 cursor-pointer"
-            aria-label="עוצמת קול"
+            aria-label={t("audio.volume")}
           />
         </div>
       </div>

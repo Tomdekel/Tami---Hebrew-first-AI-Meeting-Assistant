@@ -1,13 +1,13 @@
 "use client"
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Pencil, Check, X, Search } from "lucide-react"
+import { Pencil, Check, X, Search, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { TranscriptSegment } from "@/lib/types/database"
+import type { TranscriptSegment, SessionStatus } from "@/lib/types/database"
 
 interface TranscriptPanelProps {
   segments: TranscriptSegment[]
@@ -15,6 +15,7 @@ interface TranscriptPanelProps {
   onSeek?: (time: number) => void
   onEditSpeaker?: (speakerId: string, currentName: string) => void
   className?: string
+  status?: SessionStatus
 }
 
 // Speaker colors for visual distinction
@@ -33,8 +34,11 @@ export function TranscriptPanel({
   onSeek,
   onEditSpeaker,
   className,
+  status,
 }: TranscriptPanelProps) {
   const t = useTranslations()
+  const locale = useLocale()
+  const isRTL = locale === "he"
   const [searchQuery, setSearchQuery] = useState("")
   const [editingSpeakerId, setEditingSpeakerId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState("")
@@ -173,21 +177,21 @@ export function TranscriptPanel({
       <div className="p-4 border-b border-border space-y-3">
         <div>
           <h3 className="font-medium text-foreground">{t("meeting.transcript")}</h3>
-          <p className="text-sm text-muted-foreground mt-1">לחץ על שם הדובר כדי לערוך</p>
+          <p className="text-sm text-muted-foreground mt-1">{t("meeting.clickToEditSpeaker")}</p>
         </div>
         <div className="relative">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search className={`absolute ${isRTL ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground`} />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="חיפוש בתמליל..."
-            className="pr-9 bg-muted/50"
+            placeholder={t("meeting.searchTranscript")}
+            className={`${isRTL ? "pr-9" : "pl-9"} bg-muted/50`}
           />
           {searchQuery && (
             <Button
               variant="ghost"
               size="sm"
-              className="absolute left-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+              className={`absolute ${isRTL ? "left-1" : "right-1"} top-1/2 -translate-y-1/2 h-7 w-7 p-0`}
               onClick={() => setSearchQuery("")}
             >
               <X className="w-3 h-3" />
@@ -196,7 +200,7 @@ export function TranscriptPanel({
         </div>
         {searchQuery && (
           <p className="text-xs text-muted-foreground">
-            נמצאו {filteredSegments.length} תוצאות
+            {t("meeting.foundResults", { count: filteredSegments.length })}
           </p>
         )}
       </div>
@@ -276,10 +280,34 @@ export function TranscriptPanel({
         })}
 
         {filteredSegments.length === 0 && (
-          <div className="text-center text-muted-foreground py-8">
-            {normalizedSearch && allSegments.length > 0
-              ? `לא נמצאו תוצאות עבור "${searchQuery}"`
-              : t("meeting.noTranscript")}
+          <div className="flex flex-col items-center justify-center py-16 px-4">
+            {(status === "processing" || status === "refining") ? (
+              <>
+                <div className="relative mb-6">
+                  <div className="absolute inset-0 bg-teal-400/20 rounded-full animate-ping" />
+                  <div className="relative bg-teal-50 rounded-full p-4">
+                    <Loader2 className="h-10 w-10 animate-spin text-teal-600" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-medium text-foreground mb-2">
+                  {status === "processing" ? t("meeting.transcribingRecording") : t("meeting.improvingAccuracy")}
+                </h3>
+                <p className="text-sm text-muted-foreground text-center max-w-xs">
+                  {status === "processing"
+                    ? t("meeting.transcribingDesc")
+                    : t("meeting.refiningDesc")}
+                </p>
+                <div className="flex items-center gap-2 mt-4">
+                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
+                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
+                </div>
+              </>
+            ) : normalizedSearch && allSegments.length > 0 ? (
+              <span className="text-muted-foreground">{t("meeting.noResultsFor", { query: searchQuery })}</span>
+            ) : (
+              <span className="text-muted-foreground">{t("meeting.noTranscript")}</span>
+            )}
           </div>
         )}
       </div>
