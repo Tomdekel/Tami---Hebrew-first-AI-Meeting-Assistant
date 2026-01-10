@@ -163,6 +163,13 @@
     "tooShort": "Please record at least a few seconds",
     "liveRecording": "Live Recording"
   },
+  "language": {
+    "title": "Meeting Language",
+    "description": "Select the main spoken language in the meeting",
+    "hebrew": "עברית",
+    "english": "English",
+    "hebrewDefault": "Hebrew (default)"
+  },
   "upload": {
     "title": "Upload Audio",
     "dropzone": "Drag and drop audio file here, or click to select",

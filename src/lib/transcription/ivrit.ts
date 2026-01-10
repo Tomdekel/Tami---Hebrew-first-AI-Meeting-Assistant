@@ -33,6 +33,61 @@ export interface IvritJobStatusResponse {
   executionTime?: number;
 }
 
+// Retry configuration
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  maxDelayMs: 10000,
+  // Retry on these status codes (server errors and rate limits)
+  retryableStatusCodes: [429, 500, 502, 503, 504],
+};
+
+/**
+ * Helper function to retry API calls with exponential backoff
+ */
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if error is retryable (contains status code in message)
+      const isRetryable = RETRY_CONFIG.retryableStatusCodes.some(
+        code => lastError!.message.includes(`${code}`)
+      );
+
+      if (!isRetryable || attempt === RETRY_CONFIG.maxRetries) {
+        console.error(
+          `${operationName} failed after ${attempt} attempt(s):`,
+          lastError.message
+        );
+        throw lastError;
+      }
+
+      // Calculate delay with exponential backoff and jitter
+      const baseDelay = RETRY_CONFIG.initialDelayMs * Math.pow(2, attempt - 1);
+      const jitter = Math.random() * 1000;
+      const delay = Math.min(baseDelay + jitter, RETRY_CONFIG.maxDelayMs);
+
+      console.warn(
+        `${operationName} failed (attempt ${attempt}/${RETRY_CONFIG.maxRetries}), ` +
+        `retrying in ${Math.round(delay)}ms:`,
+        lastError.message
+      );
+
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
 export class IvritProvider implements TranscriptionProvider {
   name = "ivrit";
   private apiKey: string;
@@ -77,22 +132,24 @@ export class IvritProvider implements TranscriptionProvider {
       },
     };
 
-    const response = await fetch(this.apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+    const data = await withRetry(async () => {
+      const response = await fetch(this.apiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ivrit API error: ${response.status} - ${error}`);
-    }
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Ivrit API error: ${response.status} - ${error}`);
+      }
 
-    // runsync returns same format as status endpoint
-    const data: IvritJobStatusResponse = await response.json();
+      // runsync returns same format as status endpoint
+      return await response.json() as IvritJobStatusResponse;
+    }, "Ivrit transcribe");
 
     // Use shared parsing logic
     return this.parseJobOutput(data);
@@ -101,6 +158,7 @@ export class IvritProvider implements TranscriptionProvider {
   /**
    * Submit a transcription job asynchronously (returns immediately with job ID)
    * Supports either blob (for small files <10MB) or URL (for large files)
+   * Includes retry logic for transient failures
    */
   async submitJob(
     audioBlobOrUrl: Blob | string,
@@ -133,41 +191,53 @@ export class IvritProvider implements TranscriptionProvider {
       },
     };
 
-    const response = await fetch(this.asyncApiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+    return withRetry(async () => {
+      console.log("[Ivrit] Submitting job to:", this.asyncApiUrl);
+      console.log("[Ivrit] Request:", { isUrl, hasPrompt: !!options?.prompt, numSpeakers: options?.numSpeakers });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ivrit API error: ${response.status} - ${error}`);
-    }
+      const response = await fetch(this.asyncApiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-    const data: IvritAsyncJobResponse = await response.json();
-    return { jobId: data.id };
+      console.log("[Ivrit] Response status:", response.status);
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error("[Ivrit] API error:", { status: response.status, error });
+        throw new Error(`Ivrit API error: ${response.status} - ${error}`);
+      }
+
+      const data: IvritAsyncJobResponse = await response.json();
+      console.log("[Ivrit] Job created:", { jobId: data.id, status: data.status });
+      return { jobId: data.id };
+    }, "Ivrit submitJob");
   }
 
   /**
    * Check the status of an async transcription job
+   * Includes retry logic for transient failures
    */
   async checkJobStatus(jobId: string): Promise<IvritJobStatusResponse> {
-    const response = await fetch(`${this.statusApiUrl}/${jobId}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-    });
+    return withRetry(async () => {
+      const response = await fetch(`${this.statusApiUrl}/${jobId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ivrit status API error: ${response.status} - ${error}`);
-    }
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Ivrit status API error: ${response.status} - ${error}`);
+      }
 
-    return await response.json();
+      return await response.json();
+    }, `Ivrit checkJobStatus(${jobId})`);
   }
 
   /**
@@ -200,12 +270,21 @@ export class IvritProvider implements TranscriptionProvider {
 
     // Parse segments with speaker diarization
     // Format: { text, start, end, speakers: ["SPEAKER_00"] }
-    const segments: TranscriptSegment[] = rawSegments.map((seg) => ({
-      speaker: seg.speakers?.[0]?.replace("SPEAKER_", "Speaker ") || "Speaker 1",
-      text: seg.text.trim(),
-      start: seg.start,
-      end: seg.end,
-    }));
+    // Note: Model may output Hebrew names directly instead of "SPEAKER_00" format
+    // Always normalize to generic "Speaker N" format to avoid hallucinated names
+    const segments: TranscriptSegment[] = rawSegments.map((seg) => {
+      // Extract speaker index from "SPEAKER_XX" format, or default to 1
+      const speakerRaw = seg.speakers?.[0] || "";
+      const speakerMatch = speakerRaw.match(/SPEAKER_(\d+)/i);
+      const speakerIndex = speakerMatch ? parseInt(speakerMatch[1], 10) + 1 : 1;
+
+      return {
+        speaker: `Speaker ${speakerIndex}`,
+        text: seg.text.trim(),
+        start: seg.start,
+        end: seg.end,
+      };
+    });
 
     // Build full text from segments
     const fullText = segments.map((s) => s.text).join(" ");

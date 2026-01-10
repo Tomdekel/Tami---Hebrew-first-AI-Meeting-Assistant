@@ -18,6 +18,14 @@ function isValidEntityType(type: string): type is EntityType {
   return VALID_ENTITY_TYPES.includes(type);
 }
 
+/**
+ * Sanitize string for use as Neo4j label to prevent Cypher injection
+ * Only allows alphanumeric characters and underscores
+ */
+function sanitizeNeo4jLabel(label: string): string {
+  return label.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
@@ -48,20 +56,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // If not processing or refining, return current status
-  if (session.status !== "processing" && session.status !== "refining") {
+  // If not processing, return current status
+  if (session.status !== "processing") {
     return NextResponse.json({
       status: session.status,
       completed: session.status === "completed",
-    });
-  }
-
-  // If refining, return that status
-  if (session.status === "refining") {
-    return NextResponse.json({
-      status: "refining",
-      completed: false,
-      message: "AI is improving transcript accuracy",
     });
   }
 
@@ -84,19 +83,34 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Parse the transcription result
       const result = transcriptionService.parseAsyncJobOutput(jobStatus);
 
-      // Save transcript to database
-      const { data: transcript, error: transcriptError } = await supabase
+      // Check if transcript already exists (in case of retry after partial failure)
+      const { data: existingTranscript } = await supabase
         .from("transcripts")
-        .insert({
-          session_id: sessionId,
-          language: result.language,
-          full_text: result.fullText,
-        })
-        .select()
+        .select("id")
+        .eq("session_id", sessionId)
         .single();
 
-      if (transcriptError) {
-        throw new Error(`Failed to save transcript: ${transcriptError.message}`);
+      let transcript;
+      if (existingTranscript) {
+        // Transcript already exists - use it
+        console.log(`Transcript already exists for session ${sessionId}, using existing`);
+        transcript = existingTranscript;
+      } else {
+        // Save new transcript to database
+        const { data: newTranscript, error: transcriptError } = await supabase
+          .from("transcripts")
+          .insert({
+            session_id: sessionId,
+            language: result.language,
+            full_text: result.fullText,
+          })
+          .select()
+          .single();
+
+        if (transcriptError) {
+          throw new Error(`Failed to save transcript: ${transcriptError.message}`);
+        }
+        transcript = newTranscript;
       }
 
       // Save transcript segments (raw from ASR)
@@ -120,18 +134,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
       }
 
-      // Update status to "refining" - AI is improving accuracy
+      // Calculate unique speaker count from segments
+      const uniqueSpeakers = new Set(result.segments.map((seg) => seg.speaker)).size;
+
+      // IMPORTANT: Update status to "completed" IMMEDIATELY after saving transcript
+      // This ensures session is marked complete even if Vercel times out during optional AI enhancements
       await supabase
         .from("sessions")
         .update({
-          status: "refining",
+          status: "completed",
           duration_seconds: result.duration,
           transcription_job_id: null, // Clear job ID
+          participant_count: uniqueSpeakers,
         })
         .eq("id", sessionId);
 
-      // Run deep refinement in the background
-      // We return immediately with "refining" status, client will poll
+      // Now run optional AI enhancements - these can fail without breaking the flow
+      // Run deep refinement
       try {
         // Fetch segments for refinement
         const { data: dbSegments } = await supabase
@@ -295,7 +314,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           if (!isValidEntityType(entity.type)) {
             console.warn(`Invalid entity type: ${entity.type}, skipping Neo4j sync`);
           } else {
-            const typeLabel = entity.type.charAt(0).toUpperCase() + entity.type.slice(1);
+            // Sanitize label to prevent Cypher injection
+            const typeLabel = sanitizeNeo4jLabel(
+              entity.type.charAt(0).toUpperCase() + entity.type.slice(1)
+            );
             const now = new Date().toISOString();
             try {
               await runSingleQuery(
@@ -394,6 +416,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
                 }
 
                 const confidence = rel.confidence ?? 0.8;
+                // Sanitize relationship type to prevent Cypher injection
+                const safeRelType = sanitizeNeo4jLabel(rel.relationshipType);
 
                 // High confidence relationships are auto-created in Neo4j
                 if (confidence >= CONFIDENCE_THRESHOLD) {
@@ -406,7 +430,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
                       MATCH (target:Entity {user_id: $userId})
                       WHERE toLower(target.normalized_value) = toLower($targetNormalized)
                          OR toLower(target.display_value) = toLower($targetValue)
-                      MERGE (source)-[r:${rel.relationshipType}]->(target)
+                      MERGE (source)-[r:${safeRelType}]->(target)
                       ON CREATE SET
                         r.confidence = $confidence,
                         r.context = $context,
@@ -487,18 +511,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         console.error("Auto-entity extraction failed:", entityError);
       }
 
-      // Calculate unique speaker count from segments
-      const uniqueSpeakers = new Set(result.segments.map((seg) => seg.speaker)).size;
-
-      // Update session status to completed with participant count
-      await supabase
-        .from("sessions")
-        .update({
-          status: "completed",
-          participant_count: uniqueSpeakers,
-        })
-        .eq("id", sessionId);
-
+      // Status was already set to "completed" above - just return success
       return NextResponse.json({
         status: "completed",
         completed: true,
@@ -512,6 +525,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     if (jobStatus.status === "FAILED" || jobStatus.status === "CANCELLED") {
+      // Log detailed failure information for debugging
+      console.error("Transcription job failed:", {
+        sessionId,
+        jobId: session.transcription_job_id,
+        status: jobStatus.status,
+        error: jobStatus.error,
+        audioUrl: session.audio_url,
+      });
+
       // Update session status to failed
       await supabase
         .from("sessions")
@@ -521,10 +543,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         })
         .eq("id", sessionId);
 
+      // Parse the error to provide a user-friendly message
+      let userError = jobStatus.error || "Transcription job failed";
+      if (jobStatus.error?.includes("No segments meet minimum duration")) {
+        userError = "ההקלטה קצרה מדי או לא מכילה דיבור מספיק לתמלול. נסה להקליט לפחות 10 שניות של דיבור רציף.";
+      } else if (jobStatus.error?.includes("Diarization failed")) {
+        userError = "לא הצלחנו לזהות דוברים בהקלטה. נסה להקליט עם דיבור ברור יותר.";
+      }
+
       return NextResponse.json({
         status: "failed",
         completed: false,
-        error: jobStatus.error || "Transcription job failed",
+        error: userError,
+        details: {
+          jobId: session.transcription_job_id,
+          jobStatus: jobStatus.status,
+          technicalError: jobStatus.error,
+        },
       });
     }
 
@@ -533,11 +568,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       status: "processing",
       completed: false,
       jobStatus: jobStatus.status,
+      jobId: session.transcription_job_id,
     });
   } catch (error) {
-    console.error("Error checking transcription status:", error);
+    // Log detailed error context for debugging
+    console.error("Error checking transcription status:", {
+      sessionId,
+      jobId: session?.transcription_job_id,
+      audioUrl: session?.audio_url,
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to check status" },
+      {
+        error: error instanceof Error ? error.message : "Failed to check status",
+        code: "TRANSCRIPTION_STATUS_ERROR",
+        sessionId,
+      },
       { status: 500 }
     );
   }

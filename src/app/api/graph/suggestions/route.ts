@@ -23,21 +23,28 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get("status") || "pending";
   const sessionId = searchParams.get("sessionId");
 
+  // Pagination params with sensible defaults and limits
+  const limitParam = parseInt(searchParams.get("limit") || "50", 10);
+  const offsetParam = parseInt(searchParams.get("offset") || "0", 10);
+  const limit = Math.min(Math.max(1, limitParam), 100); // 1-100 range
+  const offset = Math.max(0, offsetParam);
+
   let query = supabase
     .from("relationship_suggestions")
     .select(`
       *,
       sessions (title)
-    `)
+    `, { count: "exact" })
     .eq("user_id", user.id)
     .eq("status", status)
-    .order("confidence", { ascending: false });
+    .order("confidence", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (sessionId) {
     query = query.eq("session_id", sessionId);
   }
 
-  const { data: suggestions, error } = await query;
+  const { data: suggestions, error, count } = await query;
 
   if (error) {
     console.error("Failed to fetch suggestions:", error);
@@ -47,6 +54,10 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     suggestions: suggestions || [],
     count: suggestions?.length || 0,
+    total: count || 0,
+    limit,
+    offset,
+    hasMore: (offset + limit) < (count || 0),
   });
 }
 
@@ -66,16 +77,20 @@ export async function POST(request: NextRequest) {
     sourceType,
     targetType,
     relationshipType,
-    confidence = 0.5,
+    confidence: rawConfidence = 0.5,
     context,
   } = body;
 
-  if (!sessionId || !sourceValue || !targetValue || !relationshipType) {
+  // Validate required fields (including empty string check)
+  if (!sessionId?.trim() || !sourceValue?.trim() || !targetValue?.trim() || !relationshipType?.trim()) {
     return NextResponse.json(
-      { error: "Missing required fields" },
+      { error: "Missing required fields: sessionId, sourceValue, targetValue, and relationshipType are required and cannot be empty" },
       { status: 400 }
     );
   }
+
+  // Validate and clamp confidence to 0-1 range
+  const confidence = Math.min(1, Math.max(0, Number(rawConfidence) || 0.5));
 
   // Validate relationship type
   if (!isValidRelationshipType(relationshipType)) {
@@ -183,21 +198,8 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  // Update the suggestion status
-  const { error: updateError } = await supabase
-    .from("relationship_suggestions")
-    .update({
-      status: action === "approve" ? "approved" : "rejected",
-      reviewed_at: new Date().toISOString(),
-    })
-    .eq("id", suggestionId);
-
-  if (updateError) {
-    console.error("Failed to update suggestion:", updateError);
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
-  }
-
-  // If approved, create the relationship in Neo4j
+  // If approving, try to create the relationship in Neo4j FIRST
+  // Only update the suggestion status after Neo4j succeeds
   if (action === "approve") {
     // Validate relationship type
     if (!isValidRelationshipType(suggestion.relationship_type)) {
@@ -239,8 +241,25 @@ export async function PATCH(request: NextRequest) {
       );
     } catch (neo4jError) {
       console.error("Failed to create relationship in Neo4j:", neo4jError);
-      // Don't fail the request - suggestion is marked approved
+      return NextResponse.json(
+        { error: "Failed to create relationship in graph database. Please try again." },
+        { status: 500 }
+      );
     }
+  }
+
+  // Update the suggestion status (only after Neo4j success for approvals)
+  const { error: updateError } = await supabase
+    .from("relationship_suggestions")
+    .update({
+      status: action === "approve" ? "approved" : "rejected",
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", suggestionId);
+
+  if (updateError) {
+    console.error("Failed to update suggestion:", updateError);
+    return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
   return NextResponse.json({

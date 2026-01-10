@@ -227,8 +227,15 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
           chunksRef.current.push(event.data);
 
           // Call onChunk callback for progressive upload
+          // Wrapped in try-catch to prevent callback errors from crashing recording
           if (onChunk) {
-            onChunk(event.data, chunkIndexRef.current++);
+            try {
+              onChunk(event.data, chunkIndexRef.current++);
+            } catch (err) {
+              console.error("Chunk upload callback error:", err);
+              // Continue recording - chunk is saved locally in chunksRef
+              // so it will be included in the final blob even if upload fails
+            }
           }
         }
       };

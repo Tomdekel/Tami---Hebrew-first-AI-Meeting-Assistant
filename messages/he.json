@@ -175,6 +175,13 @@
     "tooShort": "אנא הקלט לפחות כמה שניות",
     "liveRecording": "הקלטה חיה"
   },
+  "language": {
+    "title": "שפת הפגישה",
+    "description": "בחר את שפת הדיבור העיקרית בפגישה",
+    "hebrew": "עברית",
+    "english": "English",
+    "hebrewDefault": "עברית (ברירת מחדל)"
+  },
   "upload": {
     "title": "העלאת קובץ שמע",
     "dropzone": "גרור קובץ שמע לכאן, או לחץ לבחירה",

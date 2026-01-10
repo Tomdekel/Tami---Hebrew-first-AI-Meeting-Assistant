@@ -51,6 +51,7 @@ export default function NewMeetingPage() {
   const router = useRouter()
   const [meetingTitle, setMeetingTitle] = useState("")
   const [meetingContext, setMeetingContext] = useState("")
+  const [meetingLanguage, setMeetingLanguage] = useState<"he" | "en">("he")
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [isProcessingRecording, setIsProcessingRecording] = useState(false)
@@ -122,10 +123,11 @@ export default function NewMeetingPage() {
 
       updateFileStatus(fileId, { progress: 30 })
 
-      // Create session with title and context
+      // Create session with title, context and language
       const session = await createSession({
         title: meetingTitle || file.name.replace(/\.[^/.]+$/, ""),
         context: meetingContext || undefined,
+        detected_language: meetingLanguage,
       })
 
       updateFileStatus(fileId, { progress: 50, sessionId: session.id })
@@ -153,7 +155,7 @@ export default function NewMeetingPage() {
         error: error instanceof Error ? error.message : "Unknown error"
       })
     }
-  }, [meetingTitle, meetingContext, t, updateFileStatus])
+  }, [meetingTitle, meetingContext, meetingLanguage, t, updateFileStatus])
 
   const handleFileUpload = useCallback((files: FileList | null) => {
     if (!files) return
@@ -184,6 +186,9 @@ export default function NewMeetingPage() {
     setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId))
   }
 
+  // Track failed chunks for recovery
+  const failedChunksRef = useRef<Set<number>>(new Set())
+
   const handleRecordingComplete = useCallback(async (blob: Blob) => {
     setIsProcessingRecording(true)
 
@@ -208,14 +213,57 @@ export default function NewMeetingPage() {
         })
         console.log("Validation details:", formatValidationDetails(validation.details))
         setIsProcessingRecording(false)
+        // Reset failed chunks tracking
+        failedChunksRef.current.clear()
         return
       }
 
       toast.info(t("upload.processing"))
 
       let audioResult
-      if (chunkCountRef.current > 0 && sessionIdRef.current) {
-        // Combine chunks
+      const hasFailedChunks = failedChunksRef.current.size > 0
+
+      // If we have chunks uploaded and some failed, fall back to uploading the full blob
+      if (hasFailedChunks && chunkCountRef.current > 0) {
+        toast.warning("Some chunks failed to upload. Uploading full recording...", {
+          duration: 5000,
+        })
+        // Clean up partial chunks
+        if (sessionIdRef.current) {
+          try {
+            await deleteAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
+          } catch (cleanupError) {
+            console.error("Failed to clean up chunks:", cleanupError)
+          }
+        }
+        // Fall through to upload the full blob instead
+      }
+
+      // Use full blob upload if: no chunks, failed chunks, or chunk count is 0
+      if (chunkCountRef.current === 0 || hasFailedChunks || !sessionIdRef.current) {
+        // Create a new session if needed
+        if (!sessionIdRef.current) {
+          const session = await createSession({
+            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            context: meetingContext || undefined,
+            detected_language: meetingLanguage,
+          })
+          sessionIdRef.current = session.id
+        }
+
+        audioResult = await uploadAudioBlob(blob, user.id, sessionIdRef.current)
+
+        await fetch(`/api/sessions/${sessionIdRef.current}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audio_url: audioResult.url,
+            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            ...(meetingContext ? { context: meetingContext } : {}),
+          }),
+        })
+      } else {
+        // Combine chunks (all uploaded successfully)
         audioResult = await combineAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
         await deleteAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
 
@@ -229,21 +277,6 @@ export default function NewMeetingPage() {
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
-      } else {
-        // Create a new session
-        const session = await createSession({
-          title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
-          context: meetingContext || undefined,
-        })
-        sessionIdRef.current = session.id
-
-        audioResult = await uploadAudioBlob(blob, user.id, session.id)
-
-        await fetch(`/api/sessions/${session.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ audio_url: audioResult.url }),
-        })
       }
 
       toast.success(t("upload.success"))
@@ -253,36 +286,67 @@ export default function NewMeetingPage() {
       console.error("Failed to process recording:", error)
       toast.error(t("upload.failed"), {
         description: error instanceof Error ? error.message : "Unknown error",
+        duration: 8000,
       })
     } finally {
       setIsProcessingRecording(false)
       chunkCountRef.current = 0
       sessionIdRef.current = null
+      failedChunksRef.current.clear()
     }
-  }, [router, t, meetingTitle, meetingContext])
+  }, [router, t, meetingTitle, meetingContext, meetingLanguage])
 
   const handleChunk = useCallback(async (chunk: Blob, index: number) => {
-    try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
+    const MAX_RETRIES = 3
+    const RETRY_DELAY_MS = 1000 // Start with 1 second, double on each retry
 
-      if (!user) return
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const supabase = createClient()
+        const { data: { user } } = await supabase.auth.getUser()
 
-      if (index === 0 && !sessionIdRef.current) {
-        const session = await createSession({
-          title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
-        })
-        sessionIdRef.current = session.id
+        if (!user) {
+          toast.error(t("auth.signIn"))
+          return
+        }
+
+        if (index === 0 && !sessionIdRef.current) {
+          const session = await createSession({
+            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            detected_language: meetingLanguage,
+          })
+          sessionIdRef.current = session.id
+        }
+
+        if (sessionIdRef.current) {
+          await uploadAudioChunk(chunk, user.id, sessionIdRef.current, index)
+          chunkCountRef.current = index + 1
+          // Remove from failed chunks if it was retried successfully
+          failedChunksRef.current.delete(index)
+          return // Success!
+        }
+      } catch (error) {
+        console.error(`Chunk ${index} upload failed (attempt ${attempt}/${MAX_RETRIES}):`, error)
+
+        if (attempt < MAX_RETRIES) {
+          // Wait before retrying with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt))
+          continue
+        }
+
+        // Final failure after all retries - add to failed chunks
+        failedChunksRef.current.add(index)
+
+        // Only show toast for first few failures to avoid spam
+        if (failedChunksRef.current.size <= 3) {
+          toast.error(t("upload.failed"), {
+            description: `Chunk ${index + 1} upload failed after ${MAX_RETRIES} attempts.`,
+            duration: 5000,
+          })
+        }
       }
-
-      if (sessionIdRef.current) {
-        await uploadAudioChunk(chunk, user.id, sessionIdRef.current, index)
-        chunkCountRef.current = index + 1
-      }
-    } catch (error) {
-      console.error(`Failed to upload chunk ${index}:`, error)
     }
-  }, [meetingTitle])
+  }, [meetingTitle, meetingLanguage, t])
 
   // Recording hook for in-person mode
   const {
@@ -298,7 +362,15 @@ export default function NewMeetingPage() {
   } = useRecording({
     mode: audioMode || "microphone",
     onChunk: handleChunk,
-    onError: (err) => console.error("Recording error:", err),
+    onError: (err) => {
+      console.error("Recording error:", err)
+      // Show user-friendly error message
+      const isNoAudioError = err.message.includes("No audio captured") || err.message.includes("Share audio")
+      toast.error(isNoAudioError ? t("common.important") : t("common.error"), {
+        description: err.message,
+        duration: isNoAudioError ? 10000 : 5000,
+      })
+    },
   })
 
   const isInPersonIdle = recordingState === "idle" || recordingState === "stopped"
@@ -372,6 +444,34 @@ export default function NewMeetingPage() {
                 onChange={(e) => setMeetingContext(e.target.value)}
                 rows={3}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("language.title")}</Label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="language"
+                    value="he"
+                    checked={meetingLanguage === "he"}
+                    onChange={() => setMeetingLanguage("he")}
+                    className="w-4 h-4 text-teal-600 border-gray-300 focus:ring-teal-500"
+                  />
+                  <span className="text-sm">{t("language.hebrewDefault")}</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="language"
+                    value="en"
+                    checked={meetingLanguage === "en"}
+                    onChange={() => setMeetingLanguage("en")}
+                    className="w-4 h-4 text-teal-600 border-gray-300 focus:ring-teal-500"
+                  />
+                  <span className="text-sm">{t("language.english")}</span>
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("language.description")}</p>
             </div>
           </CardContent>
         </Card>

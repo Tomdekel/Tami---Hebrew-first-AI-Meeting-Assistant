@@ -72,7 +72,15 @@ export function Recorder({
   } = useRecording({
     mode: mode || "microphone",
     onChunk,
-    onError: (err) => console.error("Recording error:", err),
+    onError: (err) => {
+      console.error("Recording error:", err);
+      // Show user-friendly error message
+      const isNoAudioError = err.message.includes("No audio captured") || err.message.includes("Share audio");
+      toast.error(isNoAudioError ? t("common.important") : t("common.error"), {
+        description: err.message,
+        duration: isNoAudioError ? 10000 : 5000,
+      });
+    },
     onDurationWarning: handleDurationWarning,
   });
 
