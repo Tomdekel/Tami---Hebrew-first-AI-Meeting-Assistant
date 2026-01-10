@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { useRecording, type RecordingMode as AudioMode } from "@/hooks/use-recording"
+import { Waveform } from "@/components/recording/waveform"
 import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio"
 import { createSession, startTranscription } from "@/hooks/use-session"
 import { createClient } from "@/lib/supabase/client"
@@ -363,6 +364,7 @@ export default function NewMeetingPage() {
     duration: recordingDuration,
     error: recordingError,
     audioBlob: inPersonAudioBlob,
+    stream: recordingStream,
     start: startInPersonRecording,
     stop: stopInPersonRecording,
   } = useRecording({
@@ -628,8 +630,19 @@ export default function NewMeetingPage() {
                     </div>
                   ) : recordingState === "recording" ? (
                     <div className="text-center">
-                      <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                        <div className="w-4 h-4 bg-red-500 rounded-full" />
+                      {/* Live waveform visualization */}
+                      <div className="w-full max-w-xs mx-auto mb-4 h-20 relative">
+                        <Waveform
+                          stream={recordingStream}
+                          className="h-full"
+                          barColor="#ef4444"
+                          backgroundColor="#1f2937"
+                        />
+                        {/* Small pulsing indicator in corner */}
+                        <div className="absolute top-2 start-2 flex items-center gap-1.5">
+                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                          <span className="text-xs text-white/70">{isRTL ? "מקליט" : "REC"}</span>
+                        </div>
                       </div>
                       <p className="text-3xl font-mono font-bold mb-2">{formatTime(recordingDuration)}</p>
                       <p className="text-muted-foreground mb-4">{isRTL ? "מקליט..." : "Recording..."}</p>
