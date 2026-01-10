@@ -283,6 +283,12 @@ YOU MUST:
 - Preserve the original order of speech
 - NOT add content that wasn't said
 
+CRITICAL SPEAKER NAMING RULES:
+- If meeting context mentions specific names (like "interview with Daniel"), use those names.
+- DO NOT use placeholder names like "תום" or "אורי" unless they actually appear in the transcript.
+- Extract real names from the conversation (when people address each other).
+- Most meetings have only 2-3 unique speakers - consolidate to that number.
+
 OUTPUT FORMAT (JSON):
 {
   "segments": [
@@ -295,8 +301,8 @@ OUTPUT FORMAT (JSON):
     }
   ],
   "speakerMappings": {
-    "Speaker 00": "תום",
-    "Speaker 01": "אורי"
+    "Speaker 00": "[First Person's Real Name from transcript]",
+    "Speaker 01": "[Second Person's Real Name from transcript]"
   }
 }
 
@@ -373,7 +379,7 @@ export async function deepRefineTranscript(
     const transcriptText = chunk.map((seg, idx) => {
       const globalIdx = chunkStart + idx;
       const timestamp = formatTimestamp(seg.start_time);
-      const speaker = seg.speaker_name || `Speaker ${globalIdx % 10}`;
+      const speaker = seg.speaker_name || `Speaker ${(idx % 3) + 1}`;
       return `[${globalIdx}] ${timestamp} | ${speaker}: ${seg.text}`;
     }).join("\n");
 
@@ -461,8 +467,22 @@ export async function deepRefineTranscript(
 
   console.log(`[DeepRefine] Total: ${allRefinedSegments.length} segments, speaker mappings: ${JSON.stringify(allSpeakerMappings)}`);
 
+  // Deduplicate consecutive identical segments
+  const deduplicatedSegments = allRefinedSegments.filter((seg, idx, arr) => {
+    if (idx === 0) return true;
+    const prev = arr[idx - 1];
+    // Skip if same text and same speaker (likely ASR duplication)
+    const isDuplicate = seg.text === prev.text && seg.speaker === prev.speaker;
+    if (isDuplicate) {
+      console.log(`[DeepRefine] Removing duplicate segment at index ${seg.originalIndex}: "${seg.text.substring(0, 50)}..."`);
+    }
+    return !isDuplicate;
+  });
+
+  console.log(`[DeepRefine] After dedup: ${deduplicatedSegments.length} segments (removed ${allRefinedSegments.length - deduplicatedSegments.length} duplicates)`);
+
   return {
-    segments: allRefinedSegments,
+    segments: deduplicatedSegments,
     speakerMappings: allSpeakerMappings,
   };
 }

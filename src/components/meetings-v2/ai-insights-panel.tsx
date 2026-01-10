@@ -33,10 +33,13 @@ import {
   X,
   MoreHorizontal,
   GitMerge,
+  ChevronDown,
+  ChevronRight,
+  Clock,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import type { ActionItem, Decision, Summary } from "@/lib/types/database"
+import type { ActionItem, Decision, Note, Summary } from "@/lib/types/database"
 
 export interface Speaker {
   speakerId: string
@@ -100,8 +103,22 @@ export function AIInsightsPanel({
   const [mergeSource, setMergeSource] = useState<Speaker | null>(null)
   const [mergeTarget, setMergeTarget] = useState("")
   const [isMerging, setIsMerging] = useState(false)
+  const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set())
 
   const decisions = summary?.decisions || []
+  const notes = summary?.notes || []
+
+  const toggleNoteExpanded = (index: number) => {
+    setExpandedNotes((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(index)) {
+        newSet.delete(index)
+      } else {
+        newSet.add(index)
+      }
+      return newSet
+    })
+  }
 
   const getInitials = (name: string) => {
     return name
@@ -387,6 +404,62 @@ export function AIInsightsPanel({
             </div>
           )}
         </div>
+
+        {/* Meeting Notes with Timestamps */}
+        {notes.length > 0 && (
+          <div className="lg:col-span-2 bg-white rounded-lg border border-border p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-6 h-6 rounded bg-blue-100 flex items-center justify-center">
+                <Clock className="w-3.5 h-3.5 text-blue-700" />
+              </span>
+              <h3 className="font-medium text-sm">{t("meeting.notes")}</h3>
+            </div>
+            <div className="space-y-2">
+              {notes.map((note, index) => {
+                const isExpanded = expandedNotes.has(index)
+                return (
+                  <div
+                    key={index}
+                    className="border border-border rounded-lg overflow-hidden"
+                  >
+                    <button
+                      onClick={() => toggleNoteExpanded(index)}
+                      className="w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-start"
+                    >
+                      <span className="text-lg">{note.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{note.title}</p>
+                        <p className="text-xs text-muted-foreground" dir="ltr">
+                          {note.startTime} - {note.endTime}
+                        </p>
+                      </div>
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      )}
+                    </button>
+                    {isExpanded && note.bullets.length > 0 && (
+                      <div className="px-3 pb-3 ps-12">
+                        <ul className="space-y-1.5">
+                          {note.bullets.map((bullet, bulletIndex) => (
+                            <li
+                              key={bulletIndex}
+                              className="text-sm text-foreground flex gap-2"
+                            >
+                              <span className="text-blue-600 flex-shrink-0">•</span>
+                              <span>{bullet}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-lg border border-border p-4">
           <div className="flex items-center justify-between mb-3">

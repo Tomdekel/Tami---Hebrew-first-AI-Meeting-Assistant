@@ -84,7 +84,7 @@ export async function generateAndSaveSummary(
       options?.language || "en"
     );
 
-    // Save summary
+    // Save summary with notes
     const { data: summary, error: summaryError } = await supabase
       .from("summaries")
       .insert({
@@ -92,6 +92,7 @@ export async function generateAndSaveSummary(
         overview: summaryResult.overview,
         key_points: summaryResult.keyPoints,
         decisions: summaryResult.decisions,
+        notes: summaryResult.notes, // New timestamped sections
       })
       .select()
       .single();

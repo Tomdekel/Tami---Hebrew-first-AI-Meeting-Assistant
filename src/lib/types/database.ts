@@ -44,12 +44,21 @@ export interface Decision {
   context: string | null;
 }
 
+export interface Note {
+  title: string;
+  emoji: string;
+  startTime: string;
+  endTime: string;
+  bullets: string[];
+}
+
 export interface Summary {
   id: string;
   session_id: string;
   overview: string | null;
   key_points: string[];
   decisions?: Decision[];
+  notes?: Note[];
   created_at: string;
   edited_at?: string | null;
   action_items?: ActionItem[];

@@ -16,23 +16,34 @@ export interface Decision {
   context: string | null; // Why this decision was made
 }
 
-export interface SummaryResult {
-  overview: string;
-  keyPoints: string[];
-  decisions: Decision[];
-  actionItems: ActionItem[];
-  topics: string[];
+export interface Note {
+  title: string;           // Section title
+  emoji: string;           // Icon/emoji for the section
+  startTime: string;       // "00:01" format
+  endTime: string;         // "05:40" format
+  bullets: string[];       // Key points in this section
 }
 
 export interface ActionItem {
   description: string;
   assignee: string | null;
   deadline: string | null;
+  timestamp: string | null; // When it was mentioned in the meeting
+}
+
+export interface SummaryResult {
+  overview: string;        // Comprehensive paragraph
+  notes: Note[];           // Timestamped sections with emojis
+  keyPoints: string[];     // Keep for backwards compatibility
+  decisions: Decision[];
+  actionItems: ActionItem[];
+  topics: string[];
 }
 
 interface TranscriptSegment {
   speaker: string;
   text: string;
+  timestamp?: string;      // Optional timestamp for better context
 }
 
 /**
@@ -43,33 +54,55 @@ export async function generateSummary(
   context?: string,
   language: string = "en"
 ): Promise<SummaryResult> {
-  // Format transcript for the prompt
+  // Format transcript for the prompt with timestamps if available
   const formattedTranscript = segments
-    .map((seg) => `${seg.speaker}: ${seg.text}`)
+    .map((seg) => {
+      const ts = seg.timestamp ? `[${seg.timestamp}] ` : "";
+      return `${ts}${seg.speaker}: ${seg.text}`;
+    })
     .join("\n");
 
   const isHebrew = language === "he";
 
-  const systemPrompt = isHebrew
-    ? `אתה עוזר מועיל שמסכם פגישות. תפקידך לנתח תמלולי פגישות ולספק:
-1. סיכום תמציתי (2-3 משפטים)
-2. נקודות מפתח (3-5 נקודות)
-3. החלטות שהתקבלו בפגישה (כולל הקשר אם רלוונטי)
-4. פריטי פעולה עם מוטב ותאריך יעד אם צוינו
-5. נושאים עיקריים שנדונו
+  // Single English prompt that outputs in the appropriate language
+  const systemPrompt = `You are a meeting summarization expert. Analyze meeting transcripts and provide comprehensive summaries.
 
-השב בעברית. היה תמציתי וממוקד. הבחן בין החלטות (מסקנות שהוסכמו) לבין פריטי פעולה (משימות לביצוע).`
-    : `You are a helpful assistant that summarizes meetings. Your task is to analyze meeting transcripts and provide:
-1. A concise overview (2-3 sentences)
-2. Key points (3-5 bullet points)
-3. Decisions made during the meeting (with context if relevant)
-4. Action items with assignee and deadline if mentioned
-5. Main topics discussed
+Your task is to create:
 
-Be concise and focused. Distinguish between decisions (agreed conclusions) and action items (tasks to be done).`;
+1. **Overview**: A comprehensive paragraph (4-6 sentences) summarizing the main topics, participants, key outcomes, and overall purpose of the meeting. This should give someone who didn't attend a complete picture.
+
+2. **Notes**: Divide the meeting into 4-8 major topic sections. Each section needs:
+   - A descriptive title (in the transcript's language)
+   - An appropriate emoji from this list:
+     🤝 Introductions/personal updates
+     📈 Business achievements/results
+     🏗️ Roles/team structure
+     🤖 AI/technology discussions
+     💼 Business opportunities
+     💰 Compensation/salary terms
+     🎯 Goals/strategy
+     📋 Projects/deliverables
+     💡 Ideas/brainstorming
+     ❓ Q&A/discussions
+   - Time range (start - end) based on transcript timestamps
+   - 2-4 bullet points summarizing key information in that section
+
+3. **Action Items**: Tasks that need to be done, grouped by assignee. Include:
+   - Clear task description
+   - Who is responsible
+   - When it was mentioned (timestamp)
+   - Deadline if specified
+
+4. **Decisions**: Conclusions or agreements reached during the meeting.
+
+5. **Key Points**: 3-5 most important takeaways (for backwards compatibility).
+
+6. **Topics**: Main subjects discussed (for tagging).
+
+IMPORTANT: Output all text content in ${isHebrew ? "Hebrew" : "English"} (matching the transcript language).`;
 
   const userPrompt = context
-    ? `Context: ${context}\n\nTranscript:\n${formattedTranscript}`
+    ? `Meeting Context: ${context}\n\nTranscript:\n${formattedTranscript}`
     : `Transcript:\n${formattedTranscript}`;
 
   const response = await getOpenAI().chat.completions.create({
@@ -81,18 +114,49 @@ Be concise and focused. Distinguish between decisions (agreed conclusions) and a
     functions: [
       {
         name: "save_summary",
-        description: "Save the meeting summary",
+        description: "Save the comprehensive meeting summary",
         parameters: {
           type: "object",
           properties: {
             overview: {
               type: "string",
-              description: "A 2-3 sentence overview of the meeting",
+              description: "A comprehensive 4-6 sentence overview of the meeting covering main topics, participants, and outcomes",
+            },
+            notes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: {
+                    type: "string",
+                    description: "Descriptive section title",
+                  },
+                  emoji: {
+                    type: "string",
+                    description: "Single emoji representing the section topic",
+                  },
+                  startTime: {
+                    type: "string",
+                    description: "Start time in MM:SS or HH:MM:SS format",
+                  },
+                  endTime: {
+                    type: "string",
+                    description: "End time in MM:SS or HH:MM:SS format",
+                  },
+                  bullets: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "2-4 key points from this section",
+                  },
+                },
+                required: ["title", "emoji", "startTime", "endTime", "bullets"],
+              },
+              description: "4-8 timestamped sections covering major topics",
             },
             keyPoints: {
               type: "array",
               items: { type: "string" },
-              description: "3-5 key points from the meeting",
+              description: "3-5 most important takeaways from the meeting",
             },
             decisions: {
               type: "array",
@@ -101,7 +165,7 @@ Be concise and focused. Distinguish between decisions (agreed conclusions) and a
                 properties: {
                   description: {
                     type: "string",
-                    description: "The decision that was made",
+                    description: "The decision or agreement that was made",
                   },
                   context: {
                     type: "string",
@@ -111,7 +175,7 @@ Be concise and focused. Distinguish between decisions (agreed conclusions) and a
                 },
                 required: ["description"],
               },
-              description: "Decisions made during the meeting (conclusions, agreements, choices)",
+              description: "Decisions and agreements reached during the meeting",
             },
             actionItems: {
               type: "array",
@@ -125,25 +189,30 @@ Be concise and focused. Distinguish between decisions (agreed conclusions) and a
                   assignee: {
                     type: "string",
                     nullable: true,
-                    description: "Who is responsible (null if not specified)",
+                    description: "Who is responsible for this task",
                   },
                   deadline: {
                     type: "string",
                     nullable: true,
                     description: "When it's due (null if not specified)",
                   },
+                  timestamp: {
+                    type: "string",
+                    nullable: true,
+                    description: "When this action item was mentioned in the meeting (MM:SS format)",
+                  },
                 },
                 required: ["description"],
               },
-              description: "Action items extracted from the meeting (tasks to be done)",
+              description: "Tasks to be done, with assignee and optional deadline",
             },
             topics: {
               type: "array",
               items: { type: "string" },
-              description: "Main topics discussed in the meeting",
+              description: "Main topics discussed in the meeting (for tagging)",
             },
           },
-          required: ["overview", "keyPoints", "decisions", "actionItems", "topics"],
+          required: ["overview", "notes", "keyPoints", "decisions", "actionItems", "topics"],
         },
       },
     ],
@@ -161,6 +230,13 @@ Be concise and focused. Distinguish between decisions (agreed conclusions) and a
 
   return {
     overview: result.overview || "",
+    notes: (result.notes || []).map((note) => ({
+      title: note.title || "",
+      emoji: note.emoji || "📝",
+      startTime: note.startTime || "00:00",
+      endTime: note.endTime || "00:00",
+      bullets: note.bullets || [],
+    })),
     keyPoints: result.keyPoints || [],
     decisions: (result.decisions || []).map((decision) => ({
       description: decision.description,
@@ -170,6 +246,7 @@ Be concise and focused. Distinguish between decisions (agreed conclusions) and a
       description: item.description,
       assignee: item.assignee || null,
       deadline: item.deadline || null,
+      timestamp: item.timestamp || null,
     })),
     topics: result.topics || [],
   };
