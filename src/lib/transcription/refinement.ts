@@ -401,7 +401,7 @@ export async function deepRefineTranscript(
 
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-mini", // Changed from gpt-4o to reduce costs (20x cheaper)
         messages: [
           {
             role: "system",
@@ -423,7 +423,7 @@ export async function deepRefineTranscript(
       console.log(`[DeepRefine] Chunk ${chunkStart}-${chunkEnd}: finish_reason=${finishReason}, response=${content?.length || 0} chars`);
 
       if (!content) {
-        throw new Error("No response from GPT-4o");
+        throw new Error("No response from GPT-4o-mini");
       }
 
       if (finishReason === "length") {
