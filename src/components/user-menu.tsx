@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { User, LogOut, Loader2, ChevronDown } from "lucide-react";
+import { useTranslations, useLocale } from "next-intl";
+import { User, LogOut, Loader2, ChevronDown, Settings, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,6 +21,8 @@ import type { User as SupabaseUser } from "@supabase/supabase-js";
 export function UserMenu() {
   const router = useRouter();
   const t = useTranslations();
+  const locale = useLocale();
+  const isRTL = locale === "he";
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -98,7 +100,7 @@ export function UserMenu() {
           <ChevronDown className="w-4 h-4 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="start" forceMount>
+      <DropdownMenuContent className="w-56" align={isRTL ? "start" : "end"} forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
             <p className="text-sm font-medium leading-none">
@@ -111,15 +113,23 @@ export function UserMenu() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push("/profile")}>
-          <User className="me-2 h-4 w-4" />
+          <User className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
           <span>{t("auth.profile")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push("/settings")}>
+          <Settings className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
+          <span>{t("nav.settings")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push("/privacy")}>
+          <Shield className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
+          <span>{t("nav.privacy")}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut} disabled={isSigningOut}>
           {isSigningOut ? (
-            <Loader2 className="me-2 h-4 w-4 animate-spin" />
+            <Loader2 className={isRTL ? "ml-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4 animate-spin"} />
           ) : (
-            <LogOut className="me-2 h-4 w-4" />
+            <LogOut className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
           )}
           <span>{t("auth.signOut")}</span>
         </DropdownMenuItem>

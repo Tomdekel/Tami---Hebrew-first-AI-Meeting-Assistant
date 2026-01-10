@@ -182,9 +182,9 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
           </Button>
         </div>
 
-        {/* Current Time (shows progress) */}
-        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.currentTime")}>
-          {formatTime(currentTime)}
+        {/* Duration (total time) */}
+        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.duration")}>
+          {formatTime(duration)}
         </span>
 
         {/* Progress Bar */}
@@ -200,9 +200,9 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
           />
         </div>
 
-        {/* Duration (total time) */}
-        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.duration")}>
-          {formatTime(duration)}
+        {/* Current Time (shows progress) */}
+        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.currentTime")}>
+          {formatTime(currentTime)}
         </span>
 
         {/* Speed Control */}

@@ -6,6 +6,7 @@
     "entities": "Entities",
     "search": "Search",
     "settings": "Settings",
+    "privacy": "Privacy",
     "newMeeting": "New Meeting",
     "myMeetings": "My Meetings"
   },
@@ -31,6 +32,7 @@
     "backToMeetings": "Back to Meetings",
     "sessionNotFound": "Session not found",
     "meetingTitle": "Meeting title",
+    "context": "Context",
     "reprocess": "Reprocess",
     "addTag": "Add Tag",
     "noTagsAvailable": "No tags available",
@@ -224,7 +226,8 @@
     "clear": "Clear all",
     "expand": "Expand",
     "minimize": "Minimize",
-    "add": "Add"
+    "add": "Add",
+    "comingSoon": "Coming soon"
   },
   "auth": {
     "signIn": "Sign In",
@@ -367,7 +370,8 @@
       "rejected": "Rejected",
       "confidence": "confidence",
       "fromMeeting": "From meeting",
-      "reviewSuggestions": "Review Suggestions"
+      "reviewSuggestions": "Review Suggestions",
+      "autoAppliedHint": "Auto-applied when confidence > 0.88"
     }
   },
   "systemAudio": {

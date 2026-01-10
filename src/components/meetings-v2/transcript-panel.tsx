@@ -18,7 +18,6 @@ interface TranscriptPanelProps {
   status?: SessionStatus
 }
 
-// Speaker colors for visual distinction
 const SPEAKER_COLORS = [
   { bg: "bg-teal-100", text: "text-teal-700" },
   { bg: "bg-blue-100", text: "text-blue-700" },
@@ -45,13 +44,11 @@ export function TranscriptPanel({
   const containerRef = useRef<HTMLDivElement>(null)
   const activeSegmentRef = useRef<HTMLDivElement | null>(null)
 
-  // Filter out soft-deleted segments
   const allSegments = useMemo(
     () => rawSegments.filter((s) => !s.is_deleted),
     [rawSegments]
   )
 
-  // Build speaker color map
   const speakerColorMap = useMemo(() => {
     const map = new Map<string, number>()
     let colorIndex = 0
@@ -64,10 +61,8 @@ export function TranscriptPanel({
     return map
   }, [allSegments])
 
-  // Normalize search query
   const normalizedSearch = useMemo(() => searchQuery.trim().toLowerCase(), [searchQuery])
 
-  // Filter segments based on search query
   const filteredSegments = useMemo(() => {
     if (!normalizedSearch) return allSegments
     return allSegments.filter((s) =>
@@ -76,31 +71,9 @@ export function TranscriptPanel({
     )
   }, [allSegments, normalizedSearch])
 
-  // Group consecutive segments by speaker
-  const groupedSegments = useMemo(() => {
-    return filteredSegments.reduce<
-      Array<{ speakerId: string; speakerName: string; segments: TranscriptSegment[] }>
-    >((groups, segment) => {
-      const lastGroup = groups[groups.length - 1]
-
-      if (lastGroup && lastGroup.speakerId === segment.speaker_id) {
-        lastGroup.segments.push(segment)
-      } else {
-        groups.push({
-          speakerId: segment.speaker_id,
-          speakerName: segment.speaker_name || segment.speaker_id,
-          segments: [segment],
-        })
-      }
-
-      return groups
-    }, [])
-  }, [filteredSegments])
-
-  // Highlight search matches in text
   const highlightText = useCallback((text: string): React.ReactNode => {
     if (!normalizedSearch) return text
-    const regex = new RegExp(`(${normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi")
+    const regex = new RegExp(`(${normalizedSearch.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")})`, "gi")
     const parts = text.split(regex)
     return parts.map((part, i) =>
       part.toLowerCase() === normalizedSearch ? (
@@ -151,7 +124,6 @@ export function TranscriptPanel({
     }
   }
 
-  // Find active segment based on current time
   const activeSegmentId = useMemo(() => {
     for (const segment of filteredSegments) {
       if (currentTime >= segment.start_time && currentTime <= segment.end_time) {
@@ -161,7 +133,6 @@ export function TranscriptPanel({
     return null
   }, [currentTime, filteredSegments])
 
-  // Auto-scroll to active segment
   useEffect(() => {
     if (activeSegmentRef.current) {
       activeSegmentRef.current.scrollIntoView({
@@ -173,25 +144,25 @@ export function TranscriptPanel({
 
   return (
     <div className={cn("h-full flex flex-col bg-white", className)}>
-      {/* Header */}
-      <div className="p-4 border-b border-border space-y-3">
-        <div>
-          <h3 className="font-medium text-foreground">{t("meeting.transcript")}</h3>
-          <p className="text-sm text-muted-foreground mt-1">{t("meeting.clickToEditSpeaker")}</p>
-        </div>
+      <div className="p-3 border-b border-border">
         <div className="relative">
-          <Search className={`absolute ${isRTL ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground`} />
+          <Search
+            className={cn(
+              "absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
+              isRTL ? "right-3" : "left-3"
+            )}
+          />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("meeting.searchTranscript")}
-            className={`${isRTL ? "pr-9" : "pl-9"} bg-muted/50`}
+            className={cn("bg-muted/50 h-8 text-sm", isRTL ? "pr-9" : "pl-9")}
           />
           {searchQuery && (
             <Button
               variant="ghost"
               size="sm"
-              className={`absolute ${isRTL ? "left-1" : "right-1"} top-1/2 -translate-y-1/2 h-7 w-7 p-0`}
+              className={cn("absolute top-1/2 -translate-y-1/2 h-6 w-6 p-0", isRTL ? "left-1" : "right-1")}
               onClick={() => setSearchQuery("")}
             >
               <X className="w-3 h-3" />
@@ -199,116 +170,86 @@ export function TranscriptPanel({
           )}
         </div>
         {searchQuery && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground mt-1">
             {t("meeting.foundResults", { count: filteredSegments.length })}
           </p>
         )}
       </div>
 
-      {/* Transcript content */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {groupedSegments.map((group, groupIndex) => {
-          const colorIndex = speakerColorMap.get(group.speakerId) ?? 0
-          const color = SPEAKER_COLORS[colorIndex]
+      <div ref={containerRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+        {status === "processing" && allSegments.length === 0 && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("meeting.transcribing")}
+          </div>
+        )}
+
+        {filteredSegments.length === 0 && status !== "processing" && (
+          <p className="text-sm text-muted-foreground">{t("meeting.noTranscript")}</p>
+        )}
+
+        {filteredSegments.map((segment) => {
+          const isActive = activeSegmentId === segment.id
+          const colorIndex = speakerColorMap.get(segment.speaker_id) ?? 0
+          const colors = SPEAKER_COLORS[colorIndex]
+          const speakerName = segment.speaker_name || segment.speaker_id
 
           return (
-            <div key={`${group.speakerId}-${groupIndex}`} className="space-y-2">
-              {group.segments.map((segment) => {
-                const isActive = segment.id === activeSegmentId
-
-                return (
-                  <div
-                    key={segment.id}
-                    ref={isActive ? activeSegmentRef : null}
-                    className={cn(
-                      "flex gap-3 p-3 rounded-lg transition-colors",
-                      isActive ? "bg-teal-50" : "hover:bg-muted/50"
-                    )}
-                  >
-                    <Avatar className={cn("h-8 w-8 flex-shrink-0", color.bg)}>
-                      <AvatarFallback className={cn(color.bg, color.text)}>
-                        {getInitials(group.speakerName)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        {editingSpeakerId === group.speakerId ? (
-                          <div className="flex items-center gap-1">
-                            <Input
-                              value={editingName}
-                              onChange={(e) => setEditingName(e.target.value)}
-                              className="h-6 w-32 text-sm"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") handleSaveEdit()
-                                if (e.key === "Escape") handleCancelEdit()
-                              }}
-                            />
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveEdit}>
-                              <Check className="w-3 h-3 text-green-600" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCancelEdit}>
-                              <X className="w-3 h-3 text-red-600" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => handleStartEdit(group.speakerId, group.speakerName)}
-                            className="flex items-center gap-1 text-sm font-medium text-foreground hover:text-teal-600 group"
-                          >
-                            {group.speakerName}
-                            <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleTimeClick(segment.start_time)}
-                          className="text-xs text-muted-foreground hover:text-teal-600 font-mono"
-                          dir="ltr"
-                        >
-                          {formatTime(segment.start_time)}
-                        </button>
-                      </div>
-                      <p className="text-sm text-foreground leading-relaxed">
-                        {highlightText(segment.text)}
-                      </p>
+            <div
+              key={segment.id}
+              ref={isActive ? activeSegmentRef : null}
+              className={cn(
+                "flex gap-2 p-2 rounded-lg transition-colors",
+                isActive ? "bg-teal-50" : "hover:bg-muted/50"
+              )}
+            >
+              <Avatar className={cn("h-6 w-6 flex-shrink-0 text-xs", colors.bg)}>
+                <AvatarFallback className={cn("text-xs", colors.bg, colors.text)}>
+                  {getInitials(speakerName)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  {editingSpeakerId === segment.speaker_id ? (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        className="h-5 w-24 text-xs"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveEdit()
+                          if (e.key === "Escape") handleCancelEdit()
+                        }}
+                      />
+                      <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleSaveEdit}>
+                        <Check className="w-3 h-3 text-green-600" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleCancelEdit}>
+                        <X className="w-3 h-3 text-red-600" />
+                      </Button>
                     </div>
-                  </div>
-                )
-              })}
+                  ) : (
+                    <button
+                      onClick={() => handleStartEdit(segment.speaker_id, speakerName)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-teal-600 group"
+                    >
+                      {speakerName}
+                      <Pencil className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleTimeClick(segment.start_time)}
+                    className="text-xs text-muted-foreground hover:text-teal-600 font-mono"
+                    dir="ltr"
+                  >
+                    {formatTime(segment.start_time)}
+                  </button>
+                </div>
+                <p className="text-sm text-foreground leading-relaxed">{highlightText(segment.text)}</p>
+              </div>
             </div>
-          )
-        })}
-
-        {filteredSegments.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 px-4">
-            {(status === "processing" || status === "refining") ? (
-              <>
-                <div className="relative mb-6">
-                  <div className="absolute inset-0 bg-teal-400/20 rounded-full animate-ping" />
-                  <div className="relative bg-teal-50 rounded-full p-4">
-                    <Loader2 className="h-10 w-10 animate-spin text-teal-600" />
-                  </div>
-                </div>
-                <h3 className="text-lg font-medium text-foreground mb-2">
-                  {status === "processing" ? t("meeting.transcribingRecording") : t("meeting.improvingAccuracy")}
-                </h3>
-                <p className="text-sm text-muted-foreground text-center max-w-xs">
-                  {status === "processing"
-                    ? t("meeting.transcribingDesc")
-                    : t("meeting.refiningDesc")}
-                </p>
-                <div className="flex items-center gap-2 mt-4">
-                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" />
-                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
-                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                </div>
-              </>
-            ) : normalizedSearch && allSegments.length > 0 ? (
-              <span className="text-muted-foreground">{t("meeting.noResultsFor", { query: searchQuery })}</span>
-            ) : (
-              <span className="text-muted-foreground">{t("meeting.noTranscript")}</span>
-            )}
-          </div>
+          )}
         )}
       </div>
     </div>

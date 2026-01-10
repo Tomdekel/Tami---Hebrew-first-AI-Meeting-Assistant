@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { useTranslations, useLocale } from "next-intl"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -14,9 +13,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
   Dialog,
@@ -27,8 +23,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  FileText,
-  ListChecks,
   CheckSquare,
   Users,
   Calendar,
@@ -41,6 +35,7 @@ import {
   GitMerge,
 } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import type { ActionItem, Decision, Summary } from "@/lib/types/database"
 
 export interface Speaker {
@@ -75,7 +70,6 @@ export function AIInsightsPanel({
   const t = useTranslations()
   const locale = useLocale()
 
-  // Format deadline date based on locale
   const formatDeadline = (dateString: string): string => {
     try {
       const date = new Date(dateString)
@@ -89,25 +83,22 @@ export function AIInsightsPanel({
     }
   }
 
-  // Decision editing state
   const [editingDecisionIndex, setEditingDecisionIndex] = useState<number | null>(null)
   const [editingDecisionText, setEditingDecisionText] = useState("")
   const [newDecision, setNewDecision] = useState("")
   const [showNewDecision, setShowNewDecision] = useState(false)
 
-  // Task editing state
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [editingTask, setEditingTask] = useState<Partial<ActionItem> | null>(null)
   const [showNewTask, setShowNewTask] = useState(false)
   const [newTask, setNewTask] = useState({ description: "", assignee: "", deadline: "" })
   const [savingTask, setSavingTask] = useState(false)
 
-  // Speaker editing state
   const [editingSpeakerId, setEditingSpeakerId] = useState<string | null>(null)
   const [editingSpeakerName, setEditingSpeakerName] = useState("")
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [mergeSource, setMergeSource] = useState<Speaker | null>(null)
-  const [mergeTarget, setMergeTarget] = useState<string>("")
+  const [mergeTarget, setMergeTarget] = useState("")
   const [isMerging, setIsMerging] = useState(false)
 
   const decisions = summary?.decisions || []
@@ -120,7 +111,6 @@ export function AIInsightsPanel({
       .slice(0, 2)
   }
 
-  // Decision handlers
   const handleAddDecision = () => {
     if (!newDecision.trim() || !summary || !onSummaryChange) return
     const newDecisions: Decision[] = [...decisions, { description: newDecision.trim(), context: null }]
@@ -150,7 +140,6 @@ export function AIInsightsPanel({
     onSummaryChange({ ...summary, decisions: newDecisions })
   }
 
-  // Task/ActionItem handlers
   const handleToggleTask = async (item: ActionItem) => {
     try {
       const response = await fetch(`/api/sessions/${sessionId}/action-items/${item.id}`, {
@@ -190,17 +179,21 @@ export function AIInsightsPanel({
 
       const data = await response.json()
       if (onActionItemsChange) {
-        onActionItemsChange([...actionItems, {
-          id: data.actionItem.id,
-          summary_id: data.actionItem.summaryId || "",
-          description: data.actionItem.description,
-          assignee: data.actionItem.assignee,
-          deadline: data.actionItem.deadline,
-          completed: data.actionItem.completed,
-          created_at: data.actionItem.createdAt,
-          updated_at: data.actionItem.updatedAt,
-        }])
+        onActionItemsChange([
+          ...actionItems,
+          {
+            id: data.actionItem.id,
+            summary_id: data.actionItem.summaryId || "",
+            description: data.actionItem.description,
+            assignee: data.actionItem.assignee,
+            deadline: data.actionItem.deadline,
+            completed: data.actionItem.completed,
+            created_at: data.actionItem.createdAt,
+            updated_at: data.actionItem.updatedAt,
+          },
+        ])
       }
+
       setNewTask({ description: "", assignee: "", deadline: "" })
       setShowNewTask(false)
     } catch {
@@ -212,15 +205,11 @@ export function AIInsightsPanel({
 
   const handleEditTask = (task: ActionItem) => {
     setEditingTaskId(task.id)
-    setEditingTask({
-      description: task.description,
-      assignee: task.assignee || "",
-      deadline: task.deadline || "",
-    })
+    setEditingTask({ ...task })
   }
 
   const handleSaveTask = async () => {
-    if (!editingTask || !editingTask.description?.trim() || !editingTaskId) return
+    if (!editingTask || !editingTaskId || !editingTask.description?.trim()) return
 
     setSavingTask(true)
     try {
@@ -238,18 +227,10 @@ export function AIInsightsPanel({
 
       if (onActionItemsChange) {
         onActionItemsChange(
-          actionItems.map((ai) =>
-            ai.id === editingTaskId
-              ? {
-                  ...ai,
-                  description: editingTask.description!.trim(),
-                  assignee: editingTask.assignee || null,
-                  deadline: editingTask.deadline || null,
-                }
-              : ai
-          )
+          actionItems.map((ai) => (ai.id === editingTaskId ? { ...ai, ...editingTask } as ActionItem : ai))
         )
       }
+
       setEditingTaskId(null)
       setEditingTask(null)
     } catch {
@@ -275,7 +256,6 @@ export function AIInsightsPanel({
     }
   }
 
-  // Speaker handlers
   const handleEditSpeaker = (speaker: Speaker) => {
     setEditingSpeakerId(speaker.speakerId)
     setEditingSpeakerName(speaker.speakerName)
@@ -312,10 +292,14 @@ export function AIInsightsPanel({
     }
   }
 
-  const handleDeleteSpeaker = async (speakerId: string) => {
-    // Note: In tami-2, we don't actually delete speakers, we just merge them
-    // This is a placeholder - you might want to implement differently
+  const handleDeleteSpeaker = async (_speakerId: string) => {
     toast.error(t("speakers.cannotDeleteOnlyMerge"))
+  }
+
+  const handleOpenMerge = (speaker: Speaker) => {
+    setMergeSource(speaker)
+    setMergeTarget("")
+    setShowMergeDialog(true)
   }
 
   const handleMergeSpeakers = async () => {
@@ -372,431 +356,383 @@ export function AIInsightsPanel({
   }
 
   return (
-    <div className="h-full flex flex-col bg-white">
-      <Tabs defaultValue="summary" className="flex flex-col h-full">
-        <div className="border-b border-border">
-          <TabsList className="w-full justify-start p-0 h-auto bg-transparent rounded-none">
-            <TabsTrigger
-              value="summary"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent px-3 py-3 text-sm"
-            >
-              <FileText className="w-4 h-4 ml-1" />
-              {t("meeting.summary")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="decisions"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent px-3 py-3 text-sm"
-            >
-              <ListChecks className="w-4 h-4 ml-1" />
-              {t("meeting.decisions")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="tasks"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent px-3 py-3 text-sm"
-            >
-              <CheckSquare className="w-4 h-4 ml-1" />
-              {t("meeting.actions")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="speakers"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent px-3 py-3 text-sm whitespace-nowrap"
-            >
-              <Users className="w-4 h-4 ml-1 flex-shrink-0" />
-              {t("meeting.speakers")}
-            </TabsTrigger>
-          </TabsList>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl">
+        <div className="lg:col-span-2">
+          {summary?.overview ? (
+            <div className="bg-teal-50 rounded-lg p-4 border border-teal-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Badge variant="secondary" className="bg-teal-100 text-teal-700 hover:bg-teal-100">
+                  {t("meeting.aiGenerated")}
+                </Badge>
+              </div>
+              <p className="text-sm text-foreground leading-relaxed">{summary.overview}</p>
+              {summary.key_points && summary.key_points.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">{t("meeting.keyPoints")}</h4>
+                  <ul className="space-y-1">
+                    {summary.key_points.map((point, index) => (
+                      <li key={index} className="text-sm text-foreground flex gap-2">
+                        <span className="text-teal-600">•</span>
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground text-sm">{t("meeting.noSummaryYet")}</p>
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {/* Summary Tab */}
-          <TabsContent value="summary" className="m-0 p-4">
-            {summary?.overview ? (
-              <div className="bg-teal-50 rounded-lg p-4 border border-teal-100">
-                <div className="flex items-center gap-2 mb-3">
-                  <Badge variant="secondary" className="bg-teal-100 text-teal-700 hover:bg-teal-100">
-                    {t("meeting.aiGenerated")}
-                  </Badge>
-                </div>
-                <p className="text-sm text-foreground leading-relaxed">{summary.overview}</p>
-                {summary.key_points && summary.key_points.length > 0 && (
-                  <div className="mt-4 space-y-2">
-                    <h4 className="text-sm font-medium text-muted-foreground">{t("meeting.keyPoints")}</h4>
-                    <ul className="space-y-1">
-                      {summary.key_points.map((point, index) => (
-                        <li key={index} className="text-sm text-foreground flex gap-2">
-                          <span className="text-teal-600">•</span>
-                          <span>{point}</span>
-                        </li>
-                      ))}
-                    </ul>
+        <div className="bg-white rounded-lg border border-border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium text-sm flex items-center gap-2">
+              <span className="w-6 h-6 rounded bg-amber-100 flex items-center justify-center">
+                <Check className="w-3.5 h-3.5 text-amber-700" />
+              </span>
+              {t("meeting.decisions")}
+            </h3>
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowNewDecision(true)}>
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {decisions.map((decision, index) => (
+              <div key={index} className="flex gap-2 p-2 bg-muted/50 rounded group text-sm">
+                <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0 text-xs font-medium">
+                  {index + 1}
+                </span>
+                {editingDecisionIndex === index ? (
+                  <div className="flex-1 flex items-center gap-1">
+                    <Input
+                      value={editingDecisionText}
+                      onChange={(e) => setEditingDecisionText(e.target.value)}
+                      className="h-7 text-sm"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveDecision()
+                        if (e.key === "Escape") setEditingDecisionIndex(null)
+                      }}
+                    />
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveDecision}>
+                      <Check className="w-3 h-3 text-green-600" />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditingDecisionIndex(null)}>
+                      <X className="w-3 h-3 text-red-600" />
+                    </Button>
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground text-sm">{t("meeting.noSummaryYet")}</p>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* Decisions Tab */}
-          <TabsContent value="decisions" className="m-0 p-4">
-            <div className="space-y-3">
-              {decisions.map((decision, index) => (
-                <div key={index} className="flex gap-3 p-3 bg-muted/50 rounded-lg group">
-                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 text-sm font-medium">
-                    {index + 1}
-                  </div>
-                  {editingDecisionIndex === index ? (
-                    <div className="flex-1 flex items-center gap-2">
-                      <Input
-                        value={editingDecisionText}
-                        onChange={(e) => setEditingDecisionText(e.target.value)}
-                        className="flex-1 text-sm"
-                        autoFocus
-                      />
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleSaveDecision}>
-                        <Check className="w-4 h-4 text-green-600" />
+                ) : (
+                  <>
+                    <p className="flex-1 text-foreground">{decision.description}</p>
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => handleEditDecision(index, decision)}
+                      >
+                        <Pencil className="w-3 h-3" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={() => setEditingDecisionIndex(null)}
+                        className="h-6 w-6 p-0 text-red-600"
+                        onClick={() => handleDeleteDecision(index)}
                       >
-                        <X className="w-4 h-4 text-red-600" />
+                        <Trash2 className="w-3 h-3" />
                       </Button>
                     </div>
-                  ) : (
-                    <>
-                      <p className="text-sm text-foreground flex-1">{decision.description}</p>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0"
-                          onClick={() => handleEditDecision(index, decision)}
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
-                          onClick={() => handleDeleteDecision(index)}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
+                  </>
+                )}
+              </div>
+            ))}
+            {decisions.length === 0 && !showNewDecision && (
+              <div className="text-center py-2 text-sm text-muted-foreground">
+                {t("meeting.noDecisionsYet")}
+              </div>
+            )}
+            {showNewDecision && (
+              <div className="flex gap-2 p-2 bg-muted/50 rounded">
+                <Input
+                  value={newDecision}
+                  onChange={(e) => setNewDecision(e.target.value)}
+                  placeholder={t("meeting.addNewDecisionPlaceholder")}
+                  className="h-8 text-sm"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddDecision()
+                    if (e.key === "Escape") setShowNewDecision(false)
+                  }}
+                />
+                <Button size="sm" className="h-8" onClick={handleAddDecision}>
+                  {t("common.add")}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-8" onClick={() => setShowNewDecision(false)}>
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium text-sm flex items-center gap-2">
+              <span className="w-6 h-6 rounded bg-green-100 flex items-center justify-center">
+                <CheckSquare className="w-3.5 h-3.5 text-green-700" />
+              </span>
+              {t("meeting.actions")}
+            </h3>
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowNewTask(true)}>
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {actionItems.map((task) => (
+              <div key={task.id} className="flex gap-2 p-2 bg-muted/50 rounded group text-sm">
+                <Checkbox
+                  checked={task.completed}
+                  onCheckedChange={() => handleToggleTask(task)}
+                  className="mt-0.5"
+                />
+                {editingTaskId === task.id ? (
+                  <div className="flex-1 space-y-2">
+                    <Input
+                      value={editingTask?.description || ""}
+                      onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
+                      className="text-sm h-8"
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        value={editingTask?.assignee || ""}
+                        onChange={(e) => setEditingTask({ ...editingTask, assignee: e.target.value })}
+                        placeholder={t("meeting.assignedTo")}
+                        className="text-xs flex-1 h-8"
+                      />
+                      <Input
+                        type="date"
+                        value={editingTask?.deadline || ""}
+                        onChange={(e) => setEditingTask({ ...editingTask, deadline: e.target.value })}
+                        className="text-xs w-32 h-8"
+                        dir="ltr"
+                      />
+                    </div>
+                    <div className="flex gap-1 justify-end">
+                      <Button size="sm" className="h-7" onClick={handleSaveTask} disabled={savingTask}>
+                        {savingTask ? t("common.loading") : t("common.save")}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7" onClick={() => setEditingTaskId(null)}>
+                        {t("common.cancel")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1">
+                      <p className={cn("text-foreground", task.completed ? "line-through text-muted-foreground" : "")}>
+                        {task.description}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        {task.assignee && (
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3 h-3" />
+                            {task.assignee}
+                          </span>
+                        )}
+                        {task.deadline && (
+                          <span className="flex items-center gap-1" dir="ltr">
+                            <Calendar className="w-3 h-3" />
+                            {formatDeadline(task.deadline)}
+                          </span>
+                        )}
                       </div>
-                    </>
-                  )}
-                </div>
-              ))}
-
-              {decisions.length === 0 && !showNewDecision && (
-                <div className="text-center py-4">
-                  <p className="text-muted-foreground text-sm mb-2">{t("meeting.noDecisionsYet")}</p>
-                </div>
-              )}
-
-              {showNewDecision ? (
-                <div className="flex gap-2 p-3 bg-muted/50 rounded-lg">
+                    </div>
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => handleEditTask(task)}
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-red-600"
+                        onClick={() => handleDeleteTask(task.id)}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            {actionItems.length === 0 && !showNewTask && (
+              <div className="text-center py-2 text-sm text-muted-foreground">
+                {t("meeting.noTasksYet")}
+              </div>
+            )}
+            {showNewTask && (
+              <div className="p-2 rounded border border-border space-y-2">
+                <Input
+                  value={newTask.description}
+                  onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                  placeholder={t("meeting.addNewTaskPlaceholder")}
+                  className="text-sm h-8"
+                  autoFocus
+                />
+                <div className="flex gap-2">
                   <Input
-                    value={newDecision}
-                    onChange={(e) => setNewDecision(e.target.value)}
-                    placeholder={t("meeting.addNewDecisionPlaceholder")}
-                    className="flex-1 text-sm"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddDecision()
-                      if (e.key === "Escape") setShowNewDecision(false)
-                    }}
+                    value={newTask.assignee}
+                    onChange={(e) => setNewTask({ ...newTask, assignee: e.target.value })}
+                    placeholder={t("meeting.assignedTo")}
+                    className="text-sm flex-1 h-8"
                   />
-                  <Button size="sm" onClick={handleAddDecision}>
-                    {t("common.add")}
+                  <Input
+                    type="date"
+                    value={newTask.deadline}
+                    onChange={(e) => setNewTask({ ...newTask, deadline: e.target.value })}
+                    className="text-sm w-32 h-8"
+                    dir="ltr"
+                  />
+                </div>
+                <div className="flex gap-1 justify-end">
+                  <Button size="sm" className="h-7" onClick={handleAddTask} disabled={savingTask}>
+                    {savingTask ? t("common.loading") : t("common.add")}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowNewDecision(false)}>
+                  <Button size="sm" variant="ghost" className="h-7" onClick={() => setShowNewTask(false)}>
                     {t("common.cancel")}
                   </Button>
                 </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  className="w-full gap-2 bg-transparent"
-                  onClick={() => setShowNewDecision(true)}
-                >
-                  <Plus className="w-4 h-4" />
-                  {t("meeting.addDecision")}
-                </Button>
-              )}
-            </div>
-          </TabsContent>
+              </div>
+            )}
+          </div>
+        </div>
 
-          {/* Tasks Tab */}
-          <TabsContent value="tasks" className="m-0 p-4">
-            <div className="space-y-3">
-              {actionItems.map((task) => (
-                <div
-                  key={task.id}
-                  className={`p-3 rounded-lg border transition-colors group ${
-                    task.completed ? "bg-muted/30 border-muted" : "bg-white border-border"
-                  }`}
-                >
-                  {editingTaskId === task.id && editingTask ? (
-                    <div className="space-y-2">
-                      <Input
-                        value={editingTask.description || ""}
-                        onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
-                        placeholder={t("meeting.taskPlaceholder")}
-                        className="text-sm"
-                      />
-                      <div className="flex gap-2">
-                        <Input
-                          value={editingTask.assignee || ""}
-                          onChange={(e) => setEditingTask({ ...editingTask, assignee: e.target.value })}
-                          placeholder={t("meeting.assigneePlaceholder")}
-                          className="text-sm flex-1"
-                        />
-                        <Input
-                          type="date"
-                          value={editingTask.deadline || ""}
-                          onChange={(e) => setEditingTask({ ...editingTask, deadline: e.target.value })}
-                          className="text-sm w-40"
-                          dir="ltr"
-                        />
-                      </div>
-                      <div className="flex gap-2 justify-end">
-                        <Button size="sm" onClick={handleSaveTask} disabled={savingTask}>
-                          {t("common.save")}
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditingTaskId(null)}>
-                          {t("common.cancel")}
-                        </Button>
-                      </div>
+        <div className="bg-white rounded-lg border border-border p-4 lg:col-span-2">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-6 h-6 rounded bg-purple-100 flex items-center justify-center">
+              <Users className="w-3.5 h-3.5 text-purple-700" />
+            </span>
+            <h3 className="font-medium text-sm">{t("meeting.speakers")}</h3>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {speakers.map((speaker) => (
+              <div key={speaker.speakerId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg group">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-purple-100 text-purple-700 text-xs">
+                    {getInitials(speaker.speakerName)}
+                  </AvatarFallback>
+                </Avatar>
+                {editingSpeakerId === speaker.speakerId ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      value={editingSpeakerName}
+                      onChange={(e) => setEditingSpeakerName(e.target.value)}
+                      className="w-28 h-7 text-sm"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveSpeaker()
+                        if (e.key === "Escape") setEditingSpeakerId(null)
+                      }}
+                    />
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveSpeaker}>
+                      <Check className="w-3 h-3 text-green-600" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-sm font-medium">{speaker.speakerName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {speaker.segmentCount} {t("meeting.segments")}
+                      </p>
                     </div>
-                  ) : (
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={task.completed}
-                        onCheckedChange={() => handleToggleTask(task)}
-                        className="mt-0.5"
-                      />
-                      <div className="flex-1">
-                        <p
-                          className={`text-sm font-medium ${
-                            task.completed ? "line-through text-muted-foreground" : "text-foreground"
-                          }`}
-                        >
-                          {task.description}
-                        </p>
-                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                          {task.assignee && (
-                            <span className="flex items-center gap-1">
-                              <Users className="w-3 h-3" />
-                              {task.assignee}
-                            </span>
-                          )}
-                          {task.deadline && (
-                            <span className="flex items-center gap-1" dir="ltr">
-                              <Calendar className="w-3 h-3" />
-                              {formatDeadline(task.deadline)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleEditTask(task)}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
-                          onClick={() => handleDeleteTask(task.id)}
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <MoreHorizontal className="w-3 h-3" />
                         </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {actionItems.length === 0 && !showNewTask && (
-                <div className="text-center py-4">
-                  <p className="text-muted-foreground text-sm mb-2">{t("meeting.noTasksYet")}</p>
-                </div>
-              )}
-
-              {showNewTask ? (
-                <div className="p-3 rounded-lg border border-border space-y-2">
-                  <Input
-                    value={newTask.description}
-                    onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                    placeholder={t("meeting.newTaskPlaceholder")}
-                    className="text-sm"
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <Input
-                      value={newTask.assignee}
-                      onChange={(e) => setNewTask({ ...newTask, assignee: e.target.value })}
-                      placeholder={t("meeting.assigneePlaceholder")}
-                      className="text-sm flex-1"
-                    />
-                    <Input
-                      type="date"
-                      value={newTask.deadline}
-                      onChange={(e) => setNewTask({ ...newTask, deadline: e.target.value })}
-                      className="text-sm w-40"
-                      dir="ltr"
-                    />
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <Button size="sm" onClick={handleAddTask} disabled={savingTask}>
-                      {t("common.add")}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setShowNewTask(false)}>
-                      {t("common.cancel")}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Button variant="outline" className="w-full gap-2 bg-transparent" onClick={() => setShowNewTask(true)}>
-                  <Plus className="w-4 h-4" />
-                  {t("meeting.addTask")}
-                </Button>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* Speakers Tab */}
-          <TabsContent value="speakers" className="m-0 p-4">
-            <div className="space-y-3">
-              {speakers.length === 0 && (
-                <div className="text-center py-4">
-                  <p className="text-muted-foreground text-sm">{t("meeting.noSpeakersIdentified")}</p>
-                </div>
-              )}
-
-              {speakers.map((speaker) => (
-                <div key={speaker.speakerId} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg group">
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-teal-100 text-teal-700">
-                      {getInitials(speaker.speakerName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  {editingSpeakerId === speaker.speakerId ? (
-                    <div className="flex-1 flex items-center gap-2">
-                      <Input
-                        value={editingSpeakerName}
-                        onChange={(e) => setEditingSpeakerName(e.target.value)}
-                        className="flex-1 text-sm"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleSaveSpeaker()
-                          if (e.key === "Escape") setEditingSpeakerId(null)
-                        }}
-                      />
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleSaveSpeaker}>
-                        <Check className="w-4 h-4 text-green-600" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={() => setEditingSpeakerId(null)}
-                      >
-                        <X className="w-4 h-4 text-red-600" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">{speaker.speakerName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {speaker.segmentCount} {t("meeting.segments")}
-                        </p>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <MoreHorizontal className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
-                            <Pencil className="w-4 h-4 ml-2" />
-                            {t("speakers.rename")}
-                          </DropdownMenuItem>
-                          {speakers.length > 1 && (
-                            <DropdownMenuSub>
-                              <DropdownMenuSubTrigger>
-                                <GitMerge className="w-4 h-4 ml-2" />
-                                {t("speakers.mergeWith")}
-                              </DropdownMenuSubTrigger>
-                              <DropdownMenuSubContent>
-                                {speakers
-                                  .filter((s) => s.speakerId !== speaker.speakerId)
-                                  .map((target) => (
-                                    <DropdownMenuItem
-                                      key={target.speakerId}
-                                      onClick={() => {
-                                        setMergeSource(speaker)
-                                        setMergeTarget(target.speakerId)
-                                        setShowMergeDialog(true)
-                                      }}
-                                    >
-                                      {target.speakerName}
-                                    </DropdownMenuItem>
-                                  ))}
-                              </DropdownMenuSubContent>
-                            </DropdownMenuSub>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleDeleteSpeaker(speaker.speakerId)}
-                            className="text-red-600 focus:text-red-600"
-                          >
-                            <Trash2 className="w-4 h-4 ml-2" />
-                            {t("speakers.deleteSpeaker")}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          </TabsContent>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
+                          <Pencil className="w-3 h-3 mr-2" />
+                          {t("speakers.rename")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleOpenMerge(speaker)}>
+                          <GitMerge className="w-3 h-3 mr-2" />
+                          {t("speakers.merge")}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleDeleteSpeaker(speaker.speakerId)} className="text-red-600">
+                          <Trash2 className="w-3 h-3 mr-2" />
+                          {t("common.delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </>
+                )}
+              </div>
+            ))}
+            {speakers.length === 0 && (
+              <div className="text-center py-4 text-sm text-muted-foreground">
+                {t("meeting.noSpeakersYet")}
+              </div>
+            )}
+          </div>
         </div>
-      </Tabs>
+      </div>
 
-      {/* Merge Dialog */}
       <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("speakers.mergeSpeakers")}</DialogTitle>
-            <DialogDescription>
-              {t("speakers.mergeDescription", {
-                source: mergeSource?.speakerName || "",
-                target: speakers.find((s) => s.speakerId === mergeTarget)?.speakerName || ""
-              })}
-            </DialogDescription>
+            <DialogTitle>{t("speakers.mergeTitle")}</DialogTitle>
+            <DialogDescription>{t("speakers.mergeDescription")}</DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-2">
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">{t("speakers.sourceSpeaker")}</label>
+              <div className="mt-2 flex items-center gap-2 p-2 bg-muted/50 rounded">
+                <Avatar className="h-6 w-6">
+                  <AvatarFallback className="text-xs">{mergeSource ? getInitials(mergeSource.speakerName) : ""}</AvatarFallback>
+                </Avatar>
+                <span className="text-sm">{mergeSource?.speakerName}</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">{t("speakers.targetSpeaker")}</label>
+              <select
+                className="mt-2 w-full px-3 py-2 rounded-md border border-border bg-background text-sm"
+                value={mergeTarget}
+                onChange={(e) => setMergeTarget(e.target.value)}
+              >
+                <option value="">{t("speakers.selectTarget")}</option>
+                {speakers
+                  .filter((s) => s.speakerId !== mergeSource?.speakerId)
+                  .map((speaker) => (
+                    <option key={speaker.speakerId} value={speaker.speakerId}>
+                      {speaker.speakerName}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
             <Button variant="outline" onClick={() => setShowMergeDialog(false)}>
               {t("common.cancel")}
             </Button>
-            <Button
-              onClick={handleMergeSpeakers}
-              disabled={isMerging}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
+            <Button onClick={handleMergeSpeakers} disabled={!mergeTarget || isMerging}>
               {isMerging ? t("common.loading") : t("speakers.merge")}
             </Button>
           </DialogFooter>

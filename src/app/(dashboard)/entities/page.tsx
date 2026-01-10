@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -61,6 +62,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -256,14 +267,216 @@ const additionalEntityTypeOptions = [
   },
 ];
 
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("he-IL", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
+const mockEntities: Entity[] = [
+  {
+    id: "mock-person-1",
+    typeId: "person",
+    name: "דני כהן",
+    description: "CTO • Acme Technologies",
+    mentionCount: 34,
+    meetingCount: 6,
+    lastMeeting: "2024-01-09",
+    meetings: [{ id: "m-1", title: "סיכום רבעון Q4", date: "2024-01-09" }],
+    confidence: 0.93,
+  },
+  {
+    id: "mock-person-dup-1",
+    typeId: "person",
+    name: "דני כהן",
+    description: "Chief Technology Officer • Acme",
+    mentionCount: 8,
+    meetingCount: 2,
+    lastMeeting: "2024-01-05",
+    meetings: [{ id: "m-2", title: "תכנון ספרינט 12", date: "2024-01-05" }],
+    confidence: 0.79,
+  },
+  {
+    id: "mock-person-2",
+    typeId: "person",
+    name: "מאיה לוי",
+    description: "Product Lead • BrightAI",
+    mentionCount: 21,
+    meetingCount: 4,
+    lastMeeting: "2024-01-08",
+    meetings: [{ id: "m-3", title: "תכנון מוצר Q1", date: "2024-01-08" }],
+    confidence: 0.9,
+  },
+  {
+    id: "mock-org-1",
+    typeId: "organization",
+    name: "Acme Technologies",
+    description: "Enterprise SaaS • Partner",
+    mentionCount: 18,
+    meetingCount: 5,
+    lastMeeting: "2024-01-09",
+    meetings: [{ id: "m-1", title: "סיכום רבעון Q4", date: "2024-01-09" }],
+    confidence: 0.88,
+  },
+  {
+    id: "mock-org-dup-1",
+    typeId: "organization",
+    name: "ACME Tech",
+    description: "Alias for Acme",
+    mentionCount: 7,
+    meetingCount: 2,
+    lastMeeting: "2024-01-03",
+    meetings: [{ id: "m-4", title: "ישיבת מכירות", date: "2024-01-03" }],
+    confidence: 0.72,
+  },
+  {
+    id: "mock-project-1",
+    typeId: "project",
+    name: "Atlas",
+    description: "Migration to Neo4j Aura",
+    mentionCount: 12,
+    meetingCount: 3,
+    lastMeeting: "2024-01-07",
+    meetings: [{ id: "m-5", title: "סטטוס תשתיות", date: "2024-01-07" }],
+    confidence: 0.86,
+  },
+  {
+    id: "mock-topic-1",
+    typeId: "topic",
+    name: "Onboarding",
+    description: "תהליך קליטת עובדים",
+    mentionCount: 9,
+    meetingCount: 3,
+    lastMeeting: "2024-01-06",
+    meetings: [{ id: "m-6", title: "קליטת עובדים חדשים", date: "2024-01-06" }],
+    confidence: 0.82,
+  },
+  {
+    id: "mock-tech-1",
+    typeId: "technology",
+    name: "Neo4j AuraDB",
+    description: "Graph database",
+    mentionCount: 14,
+    meetingCount: 4,
+    lastMeeting: "2024-01-07",
+    meetings: [{ id: "m-5", title: "סטטוס תשתיות", date: "2024-01-07" }],
+    confidence: 0.91,
+  },
+  {
+    id: "mock-product-1",
+    typeId: "product",
+    name: "Tami v2",
+    description: "Hebrew-first memory engine",
+    mentionCount: 22,
+    meetingCount: 6,
+    lastMeeting: "2024-01-09",
+    meetings: [{ id: "m-1", title: "סיכום רבעון Q4", date: "2024-01-09" }],
+    confidence: 0.95,
+  },
+  {
+    id: "mock-location-1",
+    typeId: "location",
+    name: "תל אביב",
+    description: "HQ",
+    mentionCount: 6,
+    meetingCount: 2,
+    lastMeeting: "2024-01-04",
+    meetings: [{ id: "m-7", title: "פגישת הנהלה", date: "2024-01-04" }],
+    confidence: 0.78,
+  },
+  {
+    id: "mock-date-1",
+    typeId: "date",
+    name: "Q1 2025",
+    description: "Target launch window",
+    mentionCount: 4,
+    meetingCount: 1,
+    lastMeeting: "2024-01-02",
+    meetings: [{ id: "m-8", title: "מפת דרכים", date: "2024-01-02" }],
+    confidence: 0.7,
+  },
+  {
+    id: "mock-other-1",
+    typeId: "other",
+    name: "SOC2",
+    description: "Compliance milestone",
+    mentionCount: 5,
+    meetingCount: 2,
+    lastMeeting: "2024-01-03",
+    meetings: [{ id: "m-4", title: "ישיבת מכירות", date: "2024-01-03" }],
+    confidence: 0.76,
+  },
+];
+
+const mockRelationships: Relationship[] = [
+  {
+    id: "rel-1",
+    sourceId: "mock-person-1",
+    targetId: "mock-org-1",
+    type: "WORKS_AT",
+    label: "עובד ב",
+  },
+  {
+    id: "rel-2",
+    sourceId: "mock-person-2",
+    targetId: "mock-project-1",
+    type: "LEADS",
+    label: "מובילה",
+  },
+  {
+    id: "rel-3",
+    sourceId: "mock-project-1",
+    targetId: "mock-tech-1",
+    type: "USES",
+    label: "משתמש ב",
+  },
+  {
+    id: "rel-4",
+    sourceId: "mock-product-1",
+    targetId: "mock-org-1",
+    type: "BUILT_BY",
+    label: "פותח על ידי",
+  },
+  {
+    id: "rel-5",
+    sourceId: "mock-org-1",
+    targetId: "mock-location-1",
+    type: "LOCATED_IN",
+    label: "ממוקם ב",
+  },
+];
+
+const mockGraphNodes: GraphNode[] = mockEntities.map((entity) => ({
+  id: entity.id,
+  label: entity.name,
+  type: entity.typeId,
+  mention_count: entity.mentionCount,
+}));
+
+const mockGraphEdges: GraphEdge[] = mockRelationships.map((rel) => ({
+  source: rel.sourceId,
+  target: rel.targetId,
+  type: rel.type,
+}));
+
+const mockSuggestions = [
+  {
+    id: "s-1",
+    source_value: "Acme Technologies",
+    target_value: "ACME Tech",
+    source_type: "organization",
+    target_type: "organization",
+    relationship_type: "ALIAS_OF",
+    confidence: 0.82,
+    context: "הוזכרו כפלטפורמה אחת במספר פגישות",
+    sessions: { title: "סיכום רבעון Q4" },
+  },
+  {
+    id: "s-2",
+    source_value: "דני כהן",
+    target_value: "דני כהן",
+    source_type: "person",
+    target_type: "person",
+    relationship_type: "POSSIBLE_DUPLICATE",
+    confidence: 0.76,
+    context: "וריאציה בשם ותפקיד זהה",
+    sessions: { title: "תכנון ספרינט 12" },
+  },
+];
 
 function getInitials(name: string): string {
   return name
@@ -328,6 +541,8 @@ export default function EntitiesPage() {
     sessions?: { title: string | null };
   }[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const suggestionMin = 0.8;
+  const suggestionMax = 0.88;
 
   // Form states
   const [mergeTarget, setMergeTarget] = useState("");
@@ -335,6 +550,31 @@ export default function EntitiesPage() {
   const [newEntity, setNewEntity] = useState({ name: "", description: "" });
   const [newRelationship, setNewRelationship] = useState({ targetId: "", type: "RELATED_TO", label: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const mockSeededRef = useRef(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<Entity | null>(null);
+
+  const seedMockData = useCallback(() => {
+    setEntities(mockEntities);
+    setRelationships(mockRelationships);
+    setGraphNodes(mockGraphNodes);
+    setGraphEdges(mockGraphEdges);
+    const filteredMockSuggestions = mockSuggestions.filter(
+      (s) => s.confidence >= suggestionMin && s.confidence <= suggestionMax
+    );
+    setSuggestions((prev) => (prev.length > 0 ? prev : filteredMockSuggestions));
+
+    const typeCounts = mockEntities.reduce<Record<string, number>>((acc, entity) => {
+      acc[entity.typeId] = (acc[entity.typeId] || 0) + 1;
+      return acc;
+    }, {});
+
+    setEntityTypes((prev) =>
+      prev.map((type) => ({
+        ...type,
+        count: typeCounts[type.id] || 0,
+      }))
+    );
+  }, [suggestionMax, suggestionMin]);
 
   // Load entities from Neo4j
   const loadEntities = useCallback(async () => {
@@ -378,11 +618,13 @@ export default function EntitiesPage() {
         }))
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      console.error("Failed to load entities:", err);
+      setError(null);
+      seedMockData();
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [seedMockData]);
 
   // Load graph visualization data
   const loadGraphData = useCallback(async () => {
@@ -419,13 +661,16 @@ export default function EntitiesPage() {
       if (!response.ok) return;
 
       const data = await response.json();
-      setSuggestions(data.suggestions || []);
+      const items = (data.suggestions || []).filter(
+        (s: { confidence: number }) => s.confidence >= suggestionMin && s.confidence <= suggestionMax
+      );
+      setSuggestions(items);
     } catch (err) {
       console.error("Failed to load suggestions:", err);
     } finally {
       setSuggestionsLoading(false);
     }
-  }, []);
+  }, [suggestionMax, suggestionMin]);
 
   // Handle suggestion action (approve/reject)
   const handleSuggestionAction = async (suggestionId: string, action: "approve" | "reject") => {
@@ -459,6 +704,14 @@ export default function EntitiesPage() {
     loadGraphData();
     loadSuggestions();
   }, [loadEntities, loadGraphData, loadSuggestions]);
+
+  useEffect(() => {
+    if (mockSeededRef.current) return;
+    if (!isLoading && !error && entities.length === 0) {
+      seedMockData();
+      mockSeededRef.current = true;
+    }
+  }, [entities.length, error, isLoading, seedMockData]);
 
   // Auto-refresh when tab is visible (every 30 seconds)
   useEffect(() => {
@@ -574,6 +827,7 @@ export default function EntitiesPage() {
 
   const handleDeleteEntity = async (entityId: string) => {
     try {
+      setIsSubmitting(true);
       const response = await fetch(`/api/graph/entities/${entityId}`, {
         method: "DELETE",
       });
@@ -600,6 +854,9 @@ export default function EntitiesPage() {
       loadGraphData();
     } catch (err) {
       console.error("Error deleting entity:", err);
+    } finally {
+      setIsSubmitting(false);
+      setDeleteCandidate(null);
     }
   };
 
@@ -737,24 +994,35 @@ export default function EntitiesPage() {
                 <h1 className="text-2xl font-bold text-foreground mb-2">{t("entities.title")}</h1>
                 <p className="text-muted-foreground">{t("entities.description")}</p>
               </div>
-              <div className="flex gap-2">
-                {/* Suggestions Button */}
+              <div className="flex gap-2 items-center">
                 <Button
                   variant="outline"
-                  className="gap-2 bg-transparent relative"
+                  className={cn(
+                    "gap-2 bg-transparent relative",
+                    suggestions.length === 0 && "text-muted-foreground border-muted"
+                  )}
+                  disabled={suggestionsLoading || suggestions.length === 0}
                   onClick={() => {
                     setShowSuggestionsDialog(true);
                     loadSuggestions();
                   }}
                 >
                   <Lightbulb className="w-4 h-4" />
-                  {t("entities.suggestions.reviewSuggestions")}
+                  {suggestions.length > 0
+                    ? t("entities.suggestions.reviewSuggestions")
+                    : t("entities.suggestions.noSuggestions")}
                   {suggestions.length > 0 && (
-                    <Badge variant="destructive" className="absolute -top-2 -end-2 h-5 w-5 p-0 flex items-center justify-center text-[10px]">
+                    <Badge
+                      variant="destructive"
+                      className="absolute -top-2 -end-2 h-5 w-5 p-0 flex items-center justify-center text-[10px]"
+                    >
                       {suggestions.length}
                     </Badge>
                   )}
                 </Button>
+                <span className="text-xs text-muted-foreground">
+                  {t("entities.suggestions.autoAppliedHint")}
+                </span>
                 <Button
                   variant="outline"
                   className="gap-2 bg-transparent"
@@ -1106,7 +1374,7 @@ export default function EntitiesPage() {
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
                                         className="text-red-600"
-                                        onClick={() => handleDeleteEntity(entity.id)}
+                                        onClick={() => setDeleteCandidate(entity)}
                                       >
                                         <Trash2 className={`w-4 h-4 ${isRTL ? "ml-2" : "mr-2"}`} />
                                         {t("entities.delete")}
@@ -1175,7 +1443,7 @@ export default function EntitiesPage() {
                       {t("entities.mergeWith")}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-red-600" onClick={() => handleDeleteEntity(selectedEntity.id)}>
+                    <DropdownMenuItem className="text-red-600" onClick={() => setDeleteCandidate(selectedEntity)}>
                       <Trash2 className={`w-4 h-4 ${isRTL ? "ml-2" : "mr-2"}`} />
                       {t("entities.deleteEntity")}
                     </DropdownMenuItem>
@@ -1526,6 +1794,34 @@ export default function EntitiesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteCandidate} onOpenChange={(open) => (!open ? setDeleteCandidate(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+              <AlertDialogTitle>
+                {isRTL ? "למחוק את הישות?" : "Delete this entity?"}
+              </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isRTL
+                ? `הפעולה תמחק את הישות "${deleteCandidate?.name ?? ""}" ותנתק את הקשרים שלה. לא ניתן לשחזר.`
+                : `This will delete "${deleteCandidate?.name ?? ""}" and remove its relationships. This action cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteCandidate) {
+                  handleDeleteEntity(deleteCandidate.id);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t("common.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

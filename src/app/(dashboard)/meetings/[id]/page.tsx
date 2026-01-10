@@ -8,6 +8,7 @@ import {
   Loader2,
   Clock,
   CheckCircle2,
+  Check,
   AlertCircle,
   RefreshCw,
   Trash2,
@@ -19,6 +20,9 @@ import {
   MoreVertical,
   X,
   Download,
+  Info,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -37,12 +41,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { useSession, updateSession, deleteSession, startTranscription } from "@/hooks/use-session"
@@ -56,6 +54,7 @@ import {
   AudioPlayerProvider,
   useAudioPlayer,
 } from "@/components/meetings-v2"
+import { cn } from "@/lib/utils"
 import type { Speaker, Attachment } from "@/components/meetings-v2"
 import type { ActionItem, Summary, TranscriptSegment, Session } from "@/lib/types/database"
 
@@ -111,8 +110,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
-  const [chatOpen, setChatOpen] = useState(false)
-  const [docsOpen, setDocsOpen] = useState(false)
+  const [showChat, setShowChat] = useState(false)
+  const [showDocuments, setShowDocuments] = useState(false)
+  const [showTranscript, setShowTranscript] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
 
   // Data states
@@ -223,10 +223,10 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
 
   // Load attachments when panel opens
   useEffect(() => {
-    if (docsOpen) {
+    if (showDocuments) {
       loadAttachments()
     }
-  }, [docsOpen, loadAttachments])
+  }, [showDocuments, loadAttachments])
 
   const handleStartTranscription = async () => {
     setIsTranscribing(true)
@@ -368,64 +368,64 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const participantCount = speakers.length || (hasTranscript ? new Set(transcriptSegments.map((s) => s.speaker_id)).size : 0)
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50" dir="rtl">
-      {/* Header */}
-      <div className="bg-white border-b border-border px-6 py-4">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            {isEditing ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder={t("meeting.meetingTitle")}
-                  className="text-xl font-semibold h-auto py-1 max-w-md"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSaveTitle()
-                    if (e.key === "Escape") setIsEditing(false)
-                  }}
-                />
-                <Button size="sm" onClick={handleSaveTitle}>
-                  {t("common.save")}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)}>
-                  {t("common.cancel")}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-semibold">{session.title || t("meeting.untitled")}</h1>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-7 w-7"
-                  onClick={() => {
-                    setEditTitle(session.title || "")
-                    setIsEditing(true)
-                  }}
-                >
-                  <Edit2 className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-            <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="h-4 w-4" />
-                {formatDuration(session.duration_seconds)}
-              </span>
-              <span>·</span>
-              <span>{formatTime(session.created_at, locale)}</span>
-              <span>·</span>
-              <span>{formatDate(session.created_at, locale)}</span>
-              <span>·</span>
-              <span className="flex items-center gap-1">
-                <Users className="h-4 w-4" />
-                {participantCount} {t("meeting.speakers")}
-              </span>
-              {session.status !== "completed" && (
-                <>
-                  <span>·</span>
+    <div className="flex h-[calc(100vh-3.5rem)] bg-background" dir={locale === "he" ? "rtl" : "ltr"}>
+      <MeetingsSidebar
+        sessions={sessions}
+        selectedId={id}
+        onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
+        isLoading={!sessionsLoaded}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="border-b border-border bg-white px-6 py-4">
+          <div className="flex items-start justify-between">
+            <div className="min-w-0 flex-1">
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder={t("meeting.meetingTitle")}
+                    className="text-xl font-semibold h-9 max-w-md"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveTitle()
+                      if (e.key === "Escape") setIsEditing(false)
+                    }}
+                  />
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={handleSaveTitle}>
+                    <Check className="w-4 h-4 text-green-600" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setIsEditing(false)}>
+                    <X className="w-4 h-4 text-muted-foreground" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 group">
+                  <h1 className="text-xl font-semibold text-foreground truncate">
+                    {session.title || t("meeting.untitled")}
+                  </h1>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => {
+                      setEditTitle(session.title || "")
+                      setIsEditing(true)
+                    }}
+                  >
+                    <Edit2 className="w-4 h-4 text-muted-foreground" />
+                  </Button>
+                </div>
+              )}
+              <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground flex-wrap">
+                <span>{formatDate(session.created_at, locale)}</span>
+                <span>{formatTime(session.created_at, locale)}</span>
+                <span>{formatDuration(session.duration_seconds)}</span>
+                <span>
+                  {participantCount} {t("meeting.speakers")}
+                </span>
+                {session.status !== "completed" && (
                   <Badge
                     variant={session.status === "failed" ? "destructive" : "secondary"}
                     className="text-xs"
@@ -439,122 +439,102 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                     {session.status === "refining" && t("meeting.refining")}
                     {session.status === "failed" && t("meeting.failed")}
                   </Badge>
-                </>
+                )}
+              </div>
+              {session.context && (
+                <div className="mt-2 flex items-start gap-2">
+                  <Badge variant="secondary" className="text-xs bg-teal-50 text-teal-700 shrink-0">
+                    <Info className="w-3 h-3 mr-1" />
+                    {t("meeting.context")}
+                  </Badge>
+                  <p className="text-sm text-muted-foreground">{session.context}</p>
+                </div>
               )}
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setChatOpen(true)} aria-label={t("meeting.openChat")}>
-              <MessageSquare className="h-4 w-4 me-1" />
-              {t("meeting.chat")}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setDocsOpen(true)} aria-label={t("meeting.openDocuments")}>
-              <FileText className="h-4 w-4 me-1" />
-              {t("meeting.documents")}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={isExporting} aria-label={t("meeting.downloadFile")}>
-                  <Download className="h-4 w-4 me-1" />
-                  {t("meeting.download")}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport("html", false)}>
-                  <FileDown className="h-4 w-4 me-2" />
-                  {t("export.summaryOnly")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport("html", true)}>
-                  <FileText className="h-4 w-4 me-2" />
-                  {t("export.withTranscript")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={() => setDeleteDialogOpen(true)}
-                >
-                  <Trash2 className="h-4 w-4 me-2" />
-                  {t("common.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </div>
-
-      {/* Audio Player */}
-      {session.audio_url && (
-        <AudioPlayer src={session.audio_url} onTimeUpdate={setAudioCurrentTime} />
-      )}
-
-      {/* Processing States */}
-      {session.status === "pending" && session.audio_url && (
-        <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h3 className="font-medium">{t("meeting.readyToTranscribe")}</h3>
-            <p className="text-sm text-muted-foreground">
-              {t("meeting.clickToStartTranscription")}
-            </p>
-          </div>
-          <Button onClick={handleStartTranscription} disabled={isTranscribing}>
-            {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
-            {t("meeting.startTranscription")}
-          </Button>
-        </div>
-      )}
-
-      {session.status === "failed" && (
-        <div className="bg-red-50 border-b border-red-200 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="h-6 w-6 text-destructive" />
-            <div>
-              <h3 className="font-medium text-destructive">{t("meeting.transcriptionFailed")}</h3>
-              <p className="text-sm text-muted-foreground">{t("meeting.transcriptionError")}</p>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button variant="outline" size="sm" onClick={() => handleExport("html", true)}>
+                <Download className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+                {t("meeting.download")}
+              </Button>
+              <Button
+                variant={showDocuments ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowDocuments(!showDocuments)}
+                className={showDocuments ? "bg-teal-600 hover:bg-teal-700" : ""}
+              >
+                <FileText className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+                {t("meeting.documents")}
+              </Button>
+              <Button
+                variant={showChat ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowChat(!showChat)}
+                className={showChat ? "bg-teal-600 hover:bg-teal-700" : ""}
+              >
+                <MessageSquare className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+                {t("meeting.chat")}
+              </Button>
+              <Button
+                variant={showTranscript ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowTranscript(!showTranscript)}
+                className={showTranscript ? "bg-teal-600 hover:bg-teal-700" : ""}
+              >
+                {t("meeting.transcript")}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <MoreVertical className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => setDeleteDialogOpen(true)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+                    {t("common.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
-          <Button variant="outline" onClick={handleStartTranscription} disabled={isTranscribing}>
-            <RefreshCw className="h-4 w-4 me-2" />
-            {t("common.retry")}
-          </Button>
         </div>
-      )}
 
-      {/* Main Content: 3-Panel Layout (RTL: Sidebar-right, Transcript-center, AI-left) */}
-      <div className="flex-1 overflow-hidden">
-        {/* Desktop: 3-column grid */}
-        {/* Mobile: Stack panels vertically */}
-        <div className="h-full grid grid-cols-1 lg:grid-cols-[300px_1fr_320px]">
-          {/* RIGHT (in RTL visual): Meetings Sidebar - first in DOM, renders on right in RTL */}
-          <div className="h-full border-s border-border overflow-hidden order-3 lg:order-1">
-            <MeetingsSidebar
-              sessions={sessions}
-              selectedId={id}
-              onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
-              isLoading={!sessionsLoaded}
-            />
+        {session.audio_url && <AudioPlayer src={session.audio_url} onTimeUpdate={setAudioCurrentTime} />}
+
+        {session.status === "pending" && session.audio_url && (
+          <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 flex items-center justify-between">
+            <div>
+              <h3 className="font-medium">{t("meeting.readyToTranscribe")}</h3>
+              <p className="text-sm text-muted-foreground">{t("meeting.clickToStartTranscription")}</p>
+            </div>
+            <Button onClick={handleStartTranscription} disabled={isTranscribing}>
+              {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
+              {t("meeting.startTranscription")}
+            </Button>
           </div>
+        )}
 
-          {/* CENTER: Transcript */}
-          <div className="h-full border-s border-border overflow-hidden order-1 lg:order-2">
-            <TranscriptPanel
-              segments={transcriptSegments}
-              currentTime={audioCurrentTime}
-              onSeek={handleSeek}
-              onEditSpeaker={handleEditSpeaker}
-            />
+        {session.status === "failed" && (
+          <div className="bg-red-50 border-b border-red-200 px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+              <div>
+                <h3 className="font-medium text-destructive">{t("meeting.transcriptionFailed")}</h3>
+                <p className="text-sm text-muted-foreground">{t("meeting.transcriptionError")}</p>
+              </div>
+            </div>
+            <Button variant="outline" onClick={handleStartTranscription} disabled={isTranscribing}>
+              <RefreshCw className="h-4 w-4 me-2" />
+              {t("common.retry")}
+            </Button>
           </div>
+        )}
 
-          {/* LEFT (in RTL visual): AI Insights Panel - last in DOM, renders on left in RTL */}
-          <div className="h-full overflow-hidden order-2 lg:order-3">
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-y-auto p-6 bg-background">
             <AIInsightsPanel
               sessionId={id}
               summary={localSummary}
@@ -567,43 +547,78 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
               onRefresh={handleRefresh}
             />
           </div>
+
+          <div
+            className={cn(
+              "flex-shrink-0 border-l border-border bg-white transition-all duration-300",
+              showTranscript ? "w-96" : "w-10"
+            )}
+          >
+            {showTranscript ? (
+              <div className="h-full flex flex-col">
+                <div className="flex items-center justify-between p-3 border-b border-border">
+                  <h3 className="font-medium text-sm">{t("meeting.transcript")}</h3>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowTranscript(false)}>
+                    {locale === "he" ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <TranscriptPanel
+                    segments={transcriptSegments}
+                    currentTime={audioCurrentTime}
+                    onSeek={handleSeek}
+                    onEditSpeaker={handleEditSpeaker}
+                  />
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowTranscript(true)}
+                className="h-full w-full flex items-center justify-center hover:bg-muted/50 transition-colors"
+                title={t("meeting.transcript")}
+              >
+                <span
+                  className="writing-mode-vertical text-xs text-muted-foreground font-medium"
+                  style={{ writingMode: "vertical-rl", transform: locale === "he" ? "rotate(180deg)" : "none" }}
+                >
+                  {t("meeting.transcript")}
+                </span>
+              </button>
+            )}
+          </div>
+
+          {showDocuments && (
+            <div className="w-80 flex-shrink-0 border-l border-border bg-white">
+              <div className="flex items-center justify-between p-4 border-b border-border">
+                <h3 className="font-medium">{t("meeting.attachedDocuments")}</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowDocuments(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <DocumentsPanel
+                sessionId={id}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
+                isLoading={!attachmentsLoaded}
+              />
+            </div>
+          )}
+
+          {showChat && (
+            <div className="w-80 flex-shrink-0 border-l border-border bg-white">
+              <div className="flex items-center justify-between p-4 border-b border-border">
+                <h3 className="font-medium">{t("meeting.chat")}</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowChat(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="h-[calc(100%-56px)]">
+                <MeetingChat sessionId={id} isProcessing={isProcessing} onSeek={handleSeek} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Chat Sheet */}
-      <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-        <SheetContent side="left" className="w-full sm:w-[450px] p-0">
-          <SheetHeader className="p-4 border-b">
-            <SheetTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
-              שאל שאלה על הפגישה
-            </SheetTitle>
-          </SheetHeader>
-          <div className="h-[calc(100vh-80px)]">
-            <MeetingChat sessionId={id} isProcessing={isProcessing} onSeek={handleSeek} />
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Documents Sheet */}
-      <Sheet open={docsOpen} onOpenChange={setDocsOpen}>
-        <SheetContent side="left" className="w-full sm:w-[450px] p-0">
-          <SheetHeader className="p-4 border-b">
-            <SheetTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              {t("meeting.attachedDocuments")}
-            </SheetTitle>
-          </SheetHeader>
-          <div className="h-[calc(100vh-80px)]">
-            <DocumentsPanel
-              sessionId={id}
-              attachments={attachments}
-              onAttachmentsChange={setAttachments}
-              isLoading={!attachmentsLoaded}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
 
       {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

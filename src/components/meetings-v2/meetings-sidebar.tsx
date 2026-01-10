@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { Search, Calendar, Clock, Users, Loader2, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types/database"
 import { useTranslations, useLocale } from "next-intl"
@@ -47,16 +46,21 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
   }
 
   return (
-    <div className="w-72 flex-shrink-0 border-r border-border bg-sidebar flex flex-col h-full">
+    <div className="w-72 flex-shrink-0 border-l border-border bg-sidebar flex flex-col h-full">
       {/* Search */}
       <div className="p-4 border-b border-border">
         <div className="relative">
-          <Search className={`absolute ${isRTL ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground`} />
+          <Search
+            className={cn(
+              "absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
+              isRTL ? "right-3" : "left-3"
+            )}
+          />
           <Input
             placeholder={t("search.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={`${isRTL ? "pr-9" : "pl-9"} bg-white`}
+            className={cn("bg-white", isRTL ? "pr-9" : "pl-9")}
           />
         </div>
       </div>
@@ -87,7 +91,8 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
                   key={session.id}
                   onClick={() => onSelect(session.id)}
                   className={cn(
-                    "w-full text-right p-3 rounded-lg transition-colors",
+                    "w-full p-3 rounded-lg transition-colors",
+                    isRTL ? "text-right" : "text-left",
                     selectedId === session.id ? "bg-teal-50 border border-teal-200" : "hover:bg-muted"
                   )}
                 >
@@ -96,19 +101,24 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
                       {session.title || t("meeting.untitled")}
                     </h4>
                     {isProcessing && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 gap-1 flex-shrink-0">
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                      <span className="flex items-center gap-1 text-xs text-teal-600">
+                        <Loader2 className="w-3 h-3 animate-spin" />
                         {session.status === "processing" ? t("meeting.transcribing") : t("meeting.refining")}
-                      </Badge>
+                      </span>
                     )}
                     {isFailed && (
-                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0 gap-1 flex-shrink-0">
-                        <AlertCircle className="h-3 w-3" />
+                      <span className="flex items-center gap-1 text-xs text-red-600">
+                        <AlertCircle className="w-3 h-3" />
                         {t("meeting.failed")}
-                      </Badge>
+                      </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 mt-1.5 text-xs text-muted-foreground",
+                      isRTL && "flex-row-reverse justify-end"
+                    )}
+                  >
                     {session.created_at && (
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />

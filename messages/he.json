@@ -6,6 +6,7 @@
     "entities": "ישויות",
     "search": "חיפוש",
     "settings": "הגדרות",
+    "privacy": "פרטיות",
     "newMeeting": "פגישה חדשה",
     "myMeetings": "הפגישות שלי",
     "previous": "הקודם",
@@ -33,6 +34,7 @@
     "backToMeetings": "חזרה לפגישות",
     "sessionNotFound": "הפגישה לא נמצאה",
     "meetingTitle": "שם הפגישה",
+    "context": "הקשר",
     "reprocess": "עבד מחדש",
     "addTag": "הוסף תגית",
     "noTagsAvailable": "אין תגיות זמינות",
@@ -236,7 +238,8 @@
     "clear": "נקה הכל",
     "expand": "הרחב",
     "minimize": "מזער",
-    "add": "הוסף"
+    "add": "הוסף",
+    "comingSoon": "בקרוב"
   },
   "auth": {
     "signIn": "התחברות",
@@ -379,7 +382,8 @@
       "rejected": "נדחה",
       "confidence": "ביטחון",
       "fromMeeting": "מפגישה",
-      "reviewSuggestions": "בדוק הצעות"
+      "reviewSuggestions": "בדוק הצעות",
+      "autoAppliedHint": "נאכף אוטומטית כשביטחון מעל 0.88"
     }
   },
   "systemAudio": {

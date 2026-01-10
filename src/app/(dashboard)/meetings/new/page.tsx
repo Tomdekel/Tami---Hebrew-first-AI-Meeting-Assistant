@@ -2,9 +2,9 @@
 
 import { useState, useCallback, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -22,16 +22,13 @@ import {
   Monitor,
   Users,
   Square,
-  Pause,
-  Play,
 } from "lucide-react"
-import Link from "next/link"
 import { toast } from "sonner"
-import { Recorder, ModeSelector, IdleWaveform, RecordingTimer, Waveform } from "@/components/recording"
 import { useRecording, type RecordingMode as AudioMode } from "@/hooks/use-recording"
 import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio"
 import { createSession, startTranscription } from "@/hooks/use-session"
 import { createClient } from "@/lib/supabase/client"
+import { cn } from "@/lib/utils"
 
 type UploadStatus = "idle" | "uploading" | "processing" | "complete" | "error"
 type RecordingMode = "in-person" | "online" | null
@@ -48,8 +45,12 @@ interface UploadedFile {
 
 export default function NewMeetingPage() {
   const t = useTranslations()
+  const locale = useLocale()
+  const isRTL = locale === "he"
   const router = useRouter()
   const [meetingTitle, setMeetingTitle] = useState("")
+  const [meetingTitleError, setMeetingTitleError] = useState(false)
+  const [showTitleRequired, setShowTitleRequired] = useState(false)
   const [meetingContext, setMeetingContext] = useState("")
   const [meetingLanguage, setMeetingLanguage] = useState<"he" | "en">("he")
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
@@ -57,7 +58,10 @@ export default function NewMeetingPage() {
   const [isProcessingRecording, setIsProcessingRecording] = useState(false)
   const [recordingMode, setRecordingMode] = useState<RecordingMode>(null)
   const [audioMode, setAudioMode] = useState<AudioMode | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setMeetingLanguage(locale === "he" ? "he" : "en")
+  }, [locale])
 
   // Track chunks during recording
   const chunkCountRef = useRef(0)
@@ -159,6 +163,11 @@ export default function NewMeetingPage() {
 
   const handleFileUpload = useCallback((files: FileList | null) => {
     if (!files) return
+    if (!meetingTitle.trim()) {
+      setMeetingTitleError(true)
+      setShowTitleRequired(true)
+      return
+    }
 
     Array.from(files).forEach((file) => {
       // Validate file type
@@ -180,7 +189,7 @@ export default function NewMeetingPage() {
       setUploadedFiles((prev) => [newFile, ...prev])
       processFile(file, fileId)
     })
-  }, [processFile, t])
+  }, [meetingTitle, processFile, t])
 
   const removeFile = (fileId: string) => {
     setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId))
@@ -354,11 +363,8 @@ export default function NewMeetingPage() {
     duration: recordingDuration,
     error: recordingError,
     audioBlob: inPersonAudioBlob,
-    stream: recordingStream,
     start: startInPersonRecording,
     stop: stopInPersonRecording,
-    pause: pauseInPersonRecording,
-    resume: resumeInPersonRecording,
   } = useRecording({
     mode: audioMode || "microphone",
     onChunk: handleChunk,
@@ -375,24 +381,27 @@ export default function NewMeetingPage() {
 
   const isInPersonIdle = recordingState === "idle" || recordingState === "stopped"
   const isInPersonRecording = recordingState === "recording"
-  const isInPersonPaused = recordingState === "paused"
-  const isInPersonRequesting = recordingState === "requesting"
 
   // Handle in-person recording completion
   useEffect(() => {
     const MIN_VALID_BLOB_SIZE = 1000
     if (inPersonAudioBlob && inPersonAudioBlob.size >= MIN_VALID_BLOB_SIZE &&
-        recordingState === "stopped" && !completedRef.current && recordingMode === "in-person") {
+        recordingState === "stopped" && !completedRef.current && recordingMode !== null) {
       completedRef.current = true
       handleRecordingComplete(inPersonAudioBlob)
     }
   }, [inPersonAudioBlob, recordingState, handleRecordingComplete, recordingMode])
 
   const handleStartInPerson = useCallback(async () => {
+    if (!meetingTitle.trim()) {
+      setMeetingTitleError(true)
+      setShowTitleRequired(true)
+      return
+    }
     if (!audioMode) return
     completedRef.current = false
     await startInPersonRecording()
-  }, [audioMode, startInPersonRecording])
+  }, [audioMode, meetingTitle, startInPersonRecording])
 
   const handleStopInPerson = useCallback(() => {
     if (recordingDuration < 2) {
@@ -404,108 +413,80 @@ export default function NewMeetingPage() {
     stopInPersonRecording()
   }, [stopInPersonRecording, recordingDuration, t])
 
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
+
+  const hasCompletedFiles = uploadedFiles.some((file) => file.status === "complete")
+  const hasFilesOrRecording = uploadedFiles.length > 0
+
+  const handleProceedToMeeting = () => {
+    const sessionId = uploadedFiles.find((file) => file.status === "complete" && file.sessionId)?.sessionId
+    if (sessionId) {
+      router.push(`/meetings/${sessionId}`)
+    }
+  }
+
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-background py-8" dir="rtl">
-      <div className="max-w-2xl mx-auto px-4">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-foreground mb-2">{t("nav.newMeeting")}</h1>
-          <p className="text-muted-foreground">{t("upload.pageDescription")}</p>
+    <div className="h-[calc(100vh-3.5rem)] bg-background overflow-hidden" dir={isRTL ? "rtl" : "ltr"}>
+      <div className="h-full max-w-3xl mx-auto px-4 py-6 flex flex-col">
+        <div className="mb-4 flex-shrink-0">
+          <h1 className="text-2xl font-bold text-foreground mb-1">{t("nav.newMeeting")}</h1>
+          <p className="text-muted-foreground text-sm">{t("upload.pageDescription")}</p>
         </div>
 
-        {/* Meeting Details */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-lg">{t("upload.meetingDetails")}</CardTitle>
-            <CardDescription>{t("upload.contextDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="title">{t("upload.meetingTitle")}</Label>
+        <Card className="flex-1 flex flex-col overflow-hidden">
+          <CardContent className="p-4 flex flex-col h-full gap-4 min-h-0">
+            <div className="flex-shrink-0 space-y-1.5">
+              <Label htmlFor="title" className="flex items-center gap-1 text-sm font-medium">
+                {isRTL ? "כותרת הפגישה" : "Meeting Title"}
+                <span className="text-red-500">*</span>
+              </Label>
               <Input
                 id="title"
-                placeholder={t("upload.titlePlaceholder")}
+                placeholder={isRTL ? "לדוגמה: פגישת צוות שבועית" : "e.g., Weekly team meeting"}
                 value={meetingTitle}
-                onChange={(e) => setMeetingTitle(e.target.value)}
+                onChange={(e) => {
+                  setMeetingTitle(e.target.value)
+                  setMeetingTitleError(false)
+                  setShowTitleRequired(false)
+                }}
+                className={cn("h-10", meetingTitleError && "border-red-500 focus-visible:ring-red-500")}
               />
+              {showTitleRequired && (
+                <p className="text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  {isRTL ? "יש להזין כותרת לפני המשך" : "Please enter a title before proceeding"}
+                </p>
+              )}
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="context">{t("upload.contextTitle")}</Label>
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Info className="w-3 h-3" aria-hidden="true" />
-                  {t("upload.contextHelp")}
-                </span>
-              </div>
-              <Textarea
-                id="context"
-                placeholder={t("upload.contextPlaceholder")}
-                value={meetingContext}
-                onChange={(e) => setMeetingContext(e.target.value)}
-                rows={3}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>{t("language.title")}</Label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="language"
-                    value="he"
-                    checked={meetingLanguage === "he"}
-                    onChange={() => setMeetingLanguage("he")}
-                    className="w-4 h-4 text-teal-600 border-gray-300 focus:ring-teal-500"
-                  />
-                  <span className="text-sm">{t("language.hebrewDefault")}</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="language"
-                    value="en"
-                    checked={meetingLanguage === "en"}
-                    onChange={() => setMeetingLanguage("en")}
-                    className="w-4 h-4 text-teal-600 border-gray-300 focus:ring-teal-500"
-                  />
-                  <span className="text-sm">{t("language.english")}</span>
-                </label>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("language.description")}</p>
-            </div>
-          </CardContent>
-        </Card>
 
-        {/* Recording/Upload Tabs */}
-        <Card>
-          <CardContent className="p-0">
-            <Tabs defaultValue="upload" className="w-full">
-              <TabsList className="w-full rounded-none border-b bg-transparent h-auto p-0">
+            <Tabs defaultValue="upload" className="flex-1 flex flex-col min-h-0">
+              <TabsList className="w-full rounded-none border-b bg-transparent h-auto p-0 flex-shrink-0">
                 <TabsTrigger
                   value="upload"
-                  className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent py-4"
+                  className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent py-2.5"
                 >
-                  <Upload className="w-4 h-4 ms-2" aria-hidden="true" />
-                  {t("upload.title")}
+                  <Upload className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} aria-hidden="true" />
+                  {isRTL ? "העלאת הקלטה" : "Upload Recording"}
                 </TabsTrigger>
                 <TabsTrigger
                   value="record"
-                  className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent py-4"
+                  className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent py-2.5"
                 >
-                  <Mic className="w-4 h-4 ms-2" aria-hidden="true" />
-                  {t("recording.liveRecording")}
+                  <Mic className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} aria-hidden="true" />
+                  {isRTL ? "הקלטה חיה" : "Live Recording"}
                 </TabsTrigger>
               </TabsList>
 
-              {/* Upload Tab */}
-              <TabsContent value="upload" className="m-0 p-6">
+              <TabsContent value="upload" className="m-0 flex-1 flex flex-col pt-4 min-h-0 overflow-y-auto">
                 <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t("upload.dragHere")}
-                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 ${
+                  className={cn(
+                    "flex-1 border-2 border-dashed rounded-xl p-4 transition-all flex flex-col",
                     isDragging ? "border-teal-500 bg-teal-50" : "border-border hover:border-teal-300"
-                  }`}
+                  )}
                   onDragOver={(e) => {
                     e.preventDefault()
                     setIsDragging(true)
@@ -516,326 +497,240 @@ export default function NewMeetingPage() {
                     setIsDragging(false)
                     handleFileUpload(e.dataTransfer.files)
                   }}
-                  onClick={() => fileInputRef.current?.click()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      fileInputRef.current?.click()
-                    }
-                  }}
                 >
-                  <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Upload className="w-8 h-8 text-teal-600" aria-hidden="true" />
-                  </div>
-                  <h3 className="text-lg font-medium mb-2">{t("upload.dragHere")}</h3>
-                  <p className="text-muted-foreground mb-4">{t("upload.or")}</p>
-                  <Button variant="outline" className="pointer-events-none bg-transparent" aria-hidden="true">
-                    {t("upload.selectFiles")}
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="audio/*,video/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => handleFileUpload(e.target.files)}
-                    aria-label={t("upload.selectFiles")}
-                  />
-                  <p className="text-xs text-muted-foreground mt-4">
-                    {t("upload.supportedFormats")}
-                  </p>
-                </div>
-              </TabsContent>
-
-              {/* Record Tab - Split into in-person and online modes */}
-              <TabsContent value="record" className="m-0 p-6">
-                {isProcessingRecording ? (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="flex flex-col items-center justify-center py-12 gap-4"
-                  >
-                    <Loader2 className="h-12 w-12 animate-spin text-teal-600" aria-hidden="true" />
-                    <p className="font-medium">{t("upload.processing")}</p>
-                  </div>
-                ) : !recordingMode ? (
-                  // Mode Selection
-                  <div className="space-y-4">
-                    <p className="text-center text-muted-foreground mb-6">בחר את סוג ההקלטה</p>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* In-Person Recording */}
-                      <button
-                        onClick={() => setRecordingMode("in-person")}
-                        className="p-6 border-2 border-border rounded-xl hover:border-teal-300 hover:bg-teal-50/50 transition-all text-center group"
-                      >
-                        <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-teal-200 transition-colors">
-                          <Users className="w-8 h-8 text-teal-600" />
-                        </div>
-                        <h3 className="font-medium mb-2">פגישה פיזית</h3>
-                        <p className="text-sm text-muted-foreground">הקלטה ישירה מהמיקרופון</p>
-                      </button>
-
-                      {/* Online Meeting Recording */}
-                      <button
-                        onClick={() => setRecordingMode("online")}
-                        className="p-6 border-2 border-border rounded-xl hover:border-teal-300 hover:bg-teal-50/50 transition-all text-center group"
-                      >
-                        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-200 transition-colors">
-                          <Monitor className="w-8 h-8 text-blue-600" />
-                        </div>
-                        <h3 className="font-medium mb-2">פגישה מקוונת</h3>
-                        <p className="text-sm text-muted-foreground">Zoom, Teams, Meet וכו׳</p>
-                      </button>
-                    </div>
-                  </div>
-                ) : recordingMode === "online" ? (
-                  // Online Meeting Mode
-                  <div className="space-y-6">
-                    <div className="text-center">
-                      <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Monitor className="w-8 h-8 text-blue-600" />
+                  {uploadedFiles.length > 0 ? (
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex-1 space-y-2 overflow-y-auto">
+                        {uploadedFiles.map((file) => (
+                          <div
+                            key={file.id}
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-lg",
+                              file.status === "error" ? "bg-red-50" : "bg-muted/50"
+                            )}
+                          >
+                            {getStatusIcon(file.status)}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-sm font-medium truncate">{file.name}</p>
+                                <span className="text-xs text-muted-foreground">{file.size}</span>
+                              </div>
+                              {["uploading", "processing"].includes(file.status) && (
+                                <div className="space-y-1">
+                                  <Progress value={file.progress} className="h-1.5" />
+                                  <p className="text-xs text-muted-foreground">{getStatusText(file.status)}</p>
+                                </div>
+                              )}
+                              {file.status === "complete" && (
+                                <p className="text-xs text-green-600">{getStatusText(file.status)}</p>
+                              )}
+                              {file.status === "error" && (
+                                <p className="text-xs text-red-600">{file.error || getStatusText(file.status)}</p>
+                              )}
+                            </div>
+                            {file.status !== "complete" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => removeFile(file.id)}
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                      <h3 className="text-lg font-medium mb-2">הקלטת פגישה מקוונת</h3>
-                    </div>
-
-                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-right">
-                      <h4 className="font-medium text-blue-900 mb-3">הוראות:</h4>
-                      <ol className="space-y-3 text-sm text-blue-800">
-                        <li className="flex gap-3">
-                          <span className="w-6 h-6 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center flex-shrink-0 font-medium">
-                            1
-                          </span>
-                          <span>לחצו על &apos;התחל הקלטה&apos;</span>
-                        </li>
-                        <li className="flex gap-3">
-                          <span className="w-6 h-6 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center flex-shrink-0 font-medium">
-                            2
-                          </span>
-                          <span>בחלון שייפתח, בחרו את המסך או החלון שברצונכם לשתף</span>
-                        </li>
-                        <li className="flex gap-3">
-                          <span className="w-6 h-6 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center flex-shrink-0 font-medium">
-                            3
-                          </span>
-                          <span>
-                            <strong className="text-blue-900">חשוב:</strong> סמנו את האפשרות &apos;שתף שמע&apos; (Share
-                            audio) בתחתית החלון
-                          </span>
-                        </li>
-                        <li className="flex gap-3">
-                          <span className="w-6 h-6 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center flex-shrink-0 font-medium">
-                            4
-                          </span>
-                          <span>לחצו &apos;שתף&apos; להתחלת ההקלטה</span>
-                        </li>
-                      </ol>
-                    </div>
-
-                    <div className="flex justify-center gap-3 mb-4">
-                      <Button variant="outline" onClick={() => setRecordingMode(null)} className="bg-transparent">
-                        חזרה
-                      </Button>
-                    </div>
-
-                    <Recorder
-                      onRecordingComplete={handleRecordingComplete}
-                      onChunk={handleChunk}
-                    />
-                  </div>
-                ) : (
-                  // In-Person Mode - Integrated View
-                  <div className="space-y-6">
-                    {/* Header */}
-                    <div className="text-center">
-                      <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Users className="w-8 h-8 text-teal-600" />
+                      <div className="mt-3">
+                        <label>
+                          <input
+                            type="file"
+                            accept="audio/*,video/*"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => handleFileUpload(e.target.files)}
+                          />
+                          <Button variant="outline" size="sm" className="cursor-pointer bg-transparent" asChild>
+                            <span>{isRTL ? "הוסף קובץ נוסף" : "Add another file"}</span>
+                          </Button>
+                        </label>
                       </div>
-                      <h3 className="text-lg font-medium mb-2">הקלטת פגישה פיזית</h3>
-                      <p className="text-muted-foreground mb-4">וודא שהמיקרופון מחובר ויש לך הרשאות מתאימות</p>
                     </div>
-
-                    <div className="flex justify-center gap-3 mb-4">
-                      <Button variant="outline" onClick={() => { setRecordingMode(null); setAudioMode(null) }} className="bg-transparent">
-                        חזרה
-                      </Button>
-                    </div>
-
-                    {/* Recording Error Alert */}
-                    {recordingError && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex gap-3">
-                        <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium text-red-800">{t("common.error")}</p>
-                          <p className="text-sm text-red-600">{recordingError.message}</p>
-                        </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center">
+                      <div className="w-12 h-12 bg-teal-100 rounded-full flex items-center justify-center mb-3">
+                        <Upload className="w-6 h-6 text-teal-600" aria-hidden="true" />
                       </div>
-                    )}
-
-                    {/* Mode Selector - Only show when idle */}
-                    {isInPersonIdle && (
-                      <div className="space-y-4">
-                        <h3 className="text-base font-medium">{t("recording.selectMode")}</h3>
-                        <ModeSelector
-                          selectedMode={audioMode}
-                          onSelectMode={setAudioMode}
-                          disabled={!isInPersonIdle}
+                      <h3 className="text-base font-medium mb-1">{isRTL ? "גרור קבצים לכאן" : "Drag files here"}</h3>
+                      <p className="text-muted-foreground mb-3 text-sm">{isRTL ? "או" : "or"}</p>
+                      <label>
+                        <input
+                          type="file"
+                          accept="audio/*,video/*"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => handleFileUpload(e.target.files)}
                         />
-                      </div>
-                    )}
-
-                    {/* Waveform Area */}
-                    <div className="bg-gray-800 rounded-lg overflow-hidden">
-                      {isInPersonIdle && audioMode && (
-                        <IdleWaveform className="w-full h-24" />
-                      )}
-                      {(isInPersonRecording || isInPersonPaused) && recordingStream && (
-                        <Waveform
-                          stream={recordingStream}
-                          className="w-full h-24"
-                          barColor={isInPersonPaused ? "#6b7280" : "#14b8a6"}
-                        />
-                      )}
-                      {!audioMode && isInPersonIdle && (
-                        <div className="w-full h-24 flex items-center justify-center">
-                          <p className="text-gray-500 text-sm">{t("recording.selectModeFirst")}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Timer */}
-                    <RecordingTimer
-                      duration={recordingDuration}
-                      isRecording={isInPersonRecording}
-                    />
-
-                    {/* Controls */}
-                    <div className="flex flex-col items-center gap-4">
-                      {(isInPersonIdle || isInPersonRequesting) && (
-                        <Button
-                          size="lg"
-                          onClick={handleStartInPerson}
-                          disabled={!audioMode || isInPersonRequesting}
-                          className="gap-2 min-w-[200px] h-14 text-lg bg-teal-600 hover:bg-teal-700 text-white shadow-lg"
-                        >
-                          {isInPersonRequesting ? (
-                            <Loader2 className="h-6 w-6 animate-spin" />
-                          ) : (
-                            <Mic className="h-6 w-6" />
-                          )}
-                          {isInPersonRequesting ? t("recording.requesting") : t("recording.start")}
+                        <Button variant="outline" className="cursor-pointer bg-transparent" asChild>
+                          <span>{isRTL ? "בחר קובץ" : "Select File"}</span>
                         </Button>
-                      )}
-
-                      {isInPersonRecording && (
-                        <div className="flex items-center gap-4 flex-row-reverse">
-                          <Button
-                            size="lg"
-                            variant="destructive"
-                            onClick={handleStopInPerson}
-                            className="gap-2 h-14 min-w-[140px]"
-                          >
-                            <Square className="h-5 w-5" />
-                            {t("recording.stop")}
-                          </Button>
-                          <Button
-                            size="lg"
-                            variant="outline"
-                            onClick={pauseInPersonRecording}
-                            className="gap-2 h-14 min-w-[140px] bg-transparent"
-                          >
-                            <Pause className="h-5 w-5" />
-                            {t("recording.pause")}
-                          </Button>
-                        </div>
-                      )}
-
-                      {isInPersonPaused && (
-                        <div className="flex items-center gap-4 flex-row-reverse">
-                          <Button
-                            size="lg"
-                            variant="destructive"
-                            onClick={handleStopInPerson}
-                            className="gap-2 h-14 min-w-[140px]"
-                          >
-                            <Square className="h-5 w-5" />
-                            {t("recording.stop")}
-                          </Button>
-                          <Button
-                            size="lg"
-                            onClick={resumeInPersonRecording}
-                            className="gap-2 h-14 min-w-[140px] bg-teal-600 hover:bg-teal-700"
-                          >
-                            <Play className="h-5 w-5" />
-                            {t("recording.resume")}
-                          </Button>
-                        </div>
-                      )}
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        {isRTL ? "MP3, WAV, M4A, MP4, WebM עד 500MB" : "MP3, WAV, M4A, MP4, WebM up to 500MB"}
+                      </p>
                     </div>
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        {/* Uploaded Files List */}
-        {uploadedFiles.length > 0 && (
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle className="text-lg">{t("upload.filesInProgress")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {uploadedFiles.map((file) => (
-                <div
-                  key={file.id}
-                  role="status"
-                  aria-live="polite"
-                  className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg"
-                >
-                  <span aria-hidden="true">{getStatusIcon(file.status)}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
-                      <span className="text-xs text-muted-foreground">{file.size}</span>
-                    </div>
-                    {(file.status === "uploading" || file.status === "processing") && (
-                      <div className="space-y-1">
-                        <Progress
-                          value={file.progress}
-                          className="h-1.5"
-                          aria-label={`${file.name}: ${getStatusText(file.status)} ${file.progress}%`}
-                        />
-                        <p className="text-xs text-muted-foreground">{getStatusText(file.status)}</p>
-                      </div>
-                    )}
-                    {file.status === "complete" && (
-                      <p className="text-xs text-green-600">{getStatusText(file.status)}</p>
-                    )}
-                    {file.status === "error" && (
-                      <p className="text-xs text-red-600">{file.error || getStatusText(file.status)}</p>
-                    )}
-                  </div>
-                  {file.status === "complete" && file.sessionId ? (
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`/meetings/${file.sessionId}`}>{t("upload.viewMeeting")}</Link>
-                    </Button>
-                  ) : file.status !== "uploading" && file.status !== "processing" && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => removeFile(file.id)}
-                      aria-label={`${t("common.delete")} ${file.name}`}
-                    >
-                      <X className="w-4 h-4" aria-hidden="true" />
-                    </Button>
                   )}
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+              </TabsContent>
+
+              <TabsContent value="record" className="m-0 flex-1 flex flex-col pt-4 min-h-0 overflow-y-auto">
+                <div className="flex-1 flex flex-col items-center justify-center py-2">
+                  {isProcessingRecording ? (
+                    <div role="status" aria-live="polite" className="flex flex-col items-center justify-center py-12 gap-4">
+                      <Loader2 className="h-12 w-12 animate-spin text-teal-600" aria-hidden="true" />
+                      <p className="font-medium">{t("upload.processing")}</p>
+                    </div>
+                  ) : !recordingMode ? (
+                    <div className="w-full max-w-sm space-y-4">
+                      <p className="text-center text-muted-foreground text-sm">
+                        {isRTL ? "בחר את סוג ההקלטה" : "Select recording type"}
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={() => {
+                            setRecordingMode("in-person")
+                            setAudioMode("microphone")
+                          }}
+                          className="p-4 border-2 border-border rounded-xl hover:border-teal-300 hover:bg-teal-50/50 transition-all text-center group"
+                        >
+                          <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-2 group-hover:bg-teal-200 transition-colors">
+                            <Users className="w-5 h-5 text-teal-600" />
+                          </div>
+                          <h3 className="font-medium text-sm mb-1">{isRTL ? "פגישה פיזית" : "In-Person"}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {isRTL ? "הקלטה מהמיקרופון" : "Mic recording"}
+                          </p>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setRecordingMode("online")
+                            setAudioMode("system")
+                          }}
+                          className="p-4 border-2 border-border rounded-xl hover:border-blue-300 hover:bg-blue-50/50 transition-all text-center group"
+                        >
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-2 group-hover:bg-blue-200 transition-colors">
+                            <Monitor className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <h3 className="font-medium text-sm mb-1">{isRTL ? "פגישה מקוונת" : "Online"}</h3>
+                          <p className="text-xs text-muted-foreground">Zoom, Teams, Meet</p>
+                        </button>
+                      </div>
+                    </div>
+                  ) : recordingState === "recording" ? (
+                    <div className="text-center">
+                      <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+                        <div className="w-4 h-4 bg-red-500 rounded-full" />
+                      </div>
+                      <p className="text-3xl font-mono font-bold mb-2">{formatTime(recordingDuration)}</p>
+                      <p className="text-muted-foreground mb-4">{isRTL ? "מקליט..." : "Recording..."}</p>
+                      <Button onClick={handleStopInPerson} variant="destructive">
+                        <Square className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                        {isRTL ? "סיים הקלטה" : "Stop Recording"}
+                      </Button>
+                    </div>
+                  ) : recordingMode === "online" ? (
+                    <div className="text-center max-w-sm">
+                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <Monitor className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <h3 className="font-semibold mb-3">
+                        {isRTL ? "הקלטת פגישה מקוונת" : "Online Meeting Recording"}
+                      </h3>
+                      <div className="bg-blue-50 rounded-lg px-3 py-2 mb-4 text-right" dir="rtl">
+                        <p className="text-xs text-blue-700">
+                          {isRTL
+                            ? "בחרו חלון, וסמנו ״שתף שמע״ לפני התחלה."
+                            : "Pick a window and enable “Share audio” before starting."}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 justify-center">
+                        <Button onClick={handleStartInPerson} className="bg-blue-600 hover:bg-blue-700">
+                          <Mic className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                          {isRTL ? "התחל הקלטה" : "Start Recording"}
+                        </Button>
+                        <Button variant="outline" onClick={() => { setRecordingMode(null); setAudioMode(null) }}>
+                          {isRTL ? "חזור" : "Back"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <Users className="w-5 h-5 text-teal-600" />
+                      </div>
+                      <h3 className="font-semibold mb-2">
+                        {isRTL ? "הקלטת פגישה פיזית" : "In-Person Meeting Recording"}
+                      </h3>
+                      <p className="text-muted-foreground text-sm mb-4">
+                        {isRTL ? "הקלטה ישירה מהמיקרופון של המחשב" : "Direct recording from your computer microphone"}
+                      </p>
+                      {recordingError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">
+                          {recordingError.message}
+                        </div>
+                      )}
+                      <div className="flex gap-2 justify-center">
+                        <Button onClick={handleStartInPerson} className="bg-teal-600 hover:bg-teal-700">
+                          <Mic className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                          {isRTL ? "התחל הקלטה" : "Start Recording"}
+                        </Button>
+                        <Button variant="outline" onClick={() => { setRecordingMode(null); setAudioMode(null) }}>
+                          {isRTL ? "חזור" : "Back"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            <div className="flex-shrink-0 space-y-3 pt-2 border-t border-border">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="context" className="text-sm">
+                    {isRTL ? "הקשר לפגישה" : "Meeting Context"}
+                  </Label>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Info className="w-3 h-3" aria-hidden="true" />
+                    {isRTL ? "משפר דיוק" : "Improves accuracy"}
+                  </span>
+                </div>
+                <Textarea
+                  id="context"
+                  placeholder={
+                    isRTL
+                      ? "פגישה בין בן ומאיה על יוזמת שיווק חדשה בגרמניה. אני מציג גישת גרילה מרקטינג ל-CMO."
+                      : "Meeting between Ben and Maya about a new marketing initiative in Germany. I'm presenting a guerilla marketing approach to the CMO."
+                  }
+                  value={meetingContext}
+                  onChange={(e) => setMeetingContext(e.target.value)}
+                  rows={2}
+                  className="resize-none text-sm"
+                />
+              </div>
+
+              {hasFilesOrRecording && (
+                <Button
+                  onClick={handleProceedToMeeting}
+                  className="w-full bg-teal-600 hover:bg-teal-700"
+                  disabled={!hasCompletedFiles}
+                >
+                  {isRTL ? "המשך לפגישה" : "Continue to Meeting"}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
