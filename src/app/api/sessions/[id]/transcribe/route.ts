@@ -34,6 +34,14 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const { id: sessionId } = await params;
   const supabase = await createClient();
+  let forceTranscription = false;
+
+  try {
+    const body = await request.json();
+    forceTranscription = body?.force === true;
+  } catch (error) {
+    forceTranscription = false;
+  }
 
   const {
     data: { user },
@@ -62,25 +70,27 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
   // Check minimum audio file size (10KB minimum for meaningful transcription)
   // Very short recordings (<10KB) will fail diarization with "No segments meet minimum duration"
-  try {
-    const headResponse = await fetch(session.audio_url, { method: "HEAD" });
-    const contentLength = parseInt(headResponse.headers.get("content-length") || "0", 10);
-    const MIN_AUDIO_SIZE = 10 * 1024; // 10KB minimum
+  if (!forceTranscription) {
+    try {
+      const headResponse = await fetch(session.audio_url, { method: "HEAD" });
+      const contentLength = parseInt(headResponse.headers.get("content-length") || "0", 10);
+      const MIN_AUDIO_SIZE = 10 * 1024; // 10KB minimum
 
-    if (contentLength < MIN_AUDIO_SIZE) {
-      console.log("[transcribe] Audio file too small:", { sessionId, contentLength });
-      return NextResponse.json(
-        {
-          error: "ההקלטה קצרה מדי לתמלול. יש להקליט לפחות 10 שניות של דיבור.",
-          code: "AUDIO_TOO_SHORT",
-          details: { fileSize: contentLength, minRequired: MIN_AUDIO_SIZE },
-        },
-        { status: 400 }
-      );
+      if (contentLength < MIN_AUDIO_SIZE) {
+        console.log("[transcribe] Audio file too small:", { sessionId, contentLength });
+        return NextResponse.json(
+          {
+            error: "ההקלטה קצרה מדי לתמלול. יש להקליט לפחות 10 שניות של דיבור.",
+            code: "AUDIO_TOO_SHORT",
+            details: { fileSize: contentLength, minRequired: MIN_AUDIO_SIZE },
+          },
+          { status: 400 }
+        );
+      }
+    } catch (sizeCheckError) {
+      console.warn("[transcribe] Could not check audio file size:", sizeCheckError);
+      // Continue anyway - let the transcription service handle it
     }
-  } catch (sizeCheckError) {
-    console.warn("[transcribe] Could not check audio file size:", sizeCheckError);
-    // Continue anyway - let the transcription service handle it
   }
 
   // Check if already processing or completed

@@ -242,9 +242,19 @@ export async function deleteSession(sessionId: string): Promise<void> {
   }
 }
 
-export async function startTranscription(sessionId: string): Promise<void> {
+export async function startTranscription(
+  sessionId: string,
+  options: { force?: boolean } = {}
+): Promise<void> {
+  const shouldForce = options.force === true;
   const response = await fetch(`/api/sessions/${sessionId}/transcribe`, {
     method: "POST",
+    ...(shouldForce
+      ? {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: true }),
+        }
+      : {}),
   });
 
   if (!response.ok) {
