@@ -10,6 +10,7 @@ export type DurationWarningLevel = "soft" | "strong" | "final";
 const DEFAULT_SOFT_WARNING = 60 * 60; // 1 hour
 const DEFAULT_STRONG_WARNING = 90 * 60; // 1.5 hours
 const DEFAULT_MAX_DURATION = 120 * 60; // 2 hours
+const DEFAULT_MAX_PAUSED_DURATION = 60 * 60; // 1 hour
 
 export interface DurationWarning {
   level: DurationWarningLevel;
@@ -26,6 +27,7 @@ export interface RecordingOptions {
   softWarningAt?: number; // seconds, default 3600 (1 hour)
   strongWarningAt?: number; // seconds, default 5400 (1.5 hours)
   maxDuration?: number; // seconds, default 7200 (2 hours), 0 to disable
+  maxPausedDuration?: number; // seconds, default 3600 (1 hour), 0 to disable
 }
 
 export interface UseRecordingReturn {
@@ -51,6 +53,7 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     softWarningAt = DEFAULT_SOFT_WARNING,
     strongWarningAt = DEFAULT_STRONG_WARNING,
     maxDuration = DEFAULT_MAX_DURATION,
+    maxPausedDuration = DEFAULT_MAX_PAUSED_DURATION,
   } = options;
 
   const [state, setState] = useState<RecordingState>("idle");
@@ -65,6 +68,7 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
   const startTimeRef = useRef<number>(0);
   const pausedDurationRef = useRef<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const pausedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const softWarningShownRef = useRef(false);
   const strongWarningShownRef = useRef(false);
 
@@ -138,6 +142,26 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
       }
     };
   }, [state, softWarningAt, strongWarningAt, maxDuration, onDurationWarning]);
+
+  useEffect(() => {
+    if (state === "paused" && maxPausedDuration > 0) {
+      pausedTimeoutRef.current = setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      }, maxPausedDuration * 1000);
+    } else if (pausedTimeoutRef.current) {
+      clearTimeout(pausedTimeoutRef.current);
+      pausedTimeoutRef.current = null;
+    }
+
+    return () => {
+      if (pausedTimeoutRef.current) {
+        clearTimeout(pausedTimeoutRef.current);
+        pausedTimeoutRef.current = null;
+      }
+    };
+  }, [state, maxPausedDuration]);
 
   // Cleanup on unmount only - empty dependency array ensures this only runs on unmount
   useEffect(() => {
@@ -300,6 +324,10 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     // Stop any active stream
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
+    }
+    if (pausedTimeoutRef.current) {
+      clearTimeout(pausedTimeoutRef.current);
+      pausedTimeoutRef.current = null;
     }
     // Reset all state
     setAudioBlob(null);
