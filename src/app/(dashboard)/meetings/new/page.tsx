@@ -31,8 +31,10 @@ import { createSession, startTranscription } from "@/hooks/use-session"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
-type UploadStatus = "idle" | "uploading" | "processing" | "complete" | "error"
+type UploadStatus = "idle" | "uploading" | "processing" | "awaiting_override" | "complete" | "error"
 type RecordingMode = "in-person" | "online" | null
+
+const MIN_TRANSCRIPTION_DURATION_SECONDS = 10
 
 interface UploadedFile {
   id: string
@@ -59,6 +61,13 @@ export default function NewMeetingPage() {
   const [isProcessingRecording, setIsProcessingRecording] = useState(false)
   const [recordingMode, setRecordingMode] = useState<RecordingMode>(null)
   const [audioMode, setAudioMode] = useState<AudioMode | null>(null)
+  const [shortMeetingNotice, setShortMeetingNotice] = useState<{
+    sessionId: string
+    fileId?: string
+    durationSeconds: number
+    onComplete?: () => void
+  } | null>(null)
+  const [isOverrideRunning, setIsOverrideRunning] = useState(false)
 
   useEffect(() => {
     setMeetingLanguage(locale === "he" ? "he" : "en")
@@ -75,6 +84,8 @@ export default function NewMeetingPage() {
         return <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
       case "processing":
         return <Loader2 className="w-4 h-4 animate-spin text-teal-500" />
+      case "awaiting_override":
+        return <AlertCircle className="w-4 h-4 text-amber-500" />
       case "complete":
         return <CheckCircle2 className="w-4 h-4 text-green-500" />
       case "error":
@@ -90,6 +101,8 @@ export default function NewMeetingPage() {
         return t("upload.uploading")
       case "processing":
         return t("upload.processing")
+      case "awaiting_override":
+        return isRTL ? "ממתין לאישור" : "Awaiting override"
       case "complete":
         return t("upload.success")
       case "error":
@@ -133,6 +146,7 @@ export default function NewMeetingPage() {
         title: meetingTitle || file.name.replace(/\.[^/.]+$/, ""),
         context: meetingContext || undefined,
         detected_language: meetingLanguage,
+        duration_seconds: Math.round(validation.details.duration),
       })
 
       updateFileStatus(fileId, { progress: 50, sessionId: session.id })
@@ -148,6 +162,17 @@ export default function NewMeetingPage() {
       })
 
       updateFileStatus(fileId, { status: "processing", progress: 70 })
+
+      if (validation.details.duration < MIN_TRANSCRIPTION_DURATION_SECONDS) {
+        updateFileStatus(fileId, { status: "awaiting_override", progress: 80 })
+        setShortMeetingNotice({
+          sessionId: session.id,
+          fileId,
+          durationSeconds: validation.details.duration,
+          onComplete: () => updateFileStatus(fileId, { status: "complete", progress: 100 }),
+        })
+        return
+      }
 
       // Start transcription
       await startTranscription(session.id)
@@ -257,6 +282,7 @@ export default function NewMeetingPage() {
             title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
             context: meetingContext || undefined,
             detected_language: meetingLanguage,
+            duration_seconds: Math.round(validation.details.duration),
           })
           sessionIdRef.current = session.id
         }
@@ -269,6 +295,7 @@ export default function NewMeetingPage() {
           body: JSON.stringify({
             audio_url: audioResult.url,
             title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            duration_seconds: Math.round(validation.details.duration),
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
@@ -284,12 +311,23 @@ export default function NewMeetingPage() {
           body: JSON.stringify({
             audio_url: audioResult.url,
             title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            duration_seconds: Math.round(validation.details.duration),
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
       }
 
       toast.success(t("upload.success"))
+
+      if (validation.details.duration < MIN_TRANSCRIPTION_DURATION_SECONDS) {
+        setShortMeetingNotice({
+          sessionId: sessionIdRef.current!,
+          durationSeconds: validation.details.duration,
+          onComplete: () => router.push(`/meetings/${sessionIdRef.current}`)
+        })
+        return
+      }
+
       await startTranscription(sessionIdRef.current!)
       router.push(`/meetings/${sessionIdRef.current}`)
     } catch (error) {
@@ -431,6 +469,29 @@ export default function NewMeetingPage() {
     }
   }
 
+  const handleShortMeetingOverride = async () => {
+    if (!shortMeetingNotice) return
+    setIsOverrideRunning(true)
+    if (shortMeetingNotice.fileId) {
+      updateFileStatus(shortMeetingNotice.fileId, { status: "processing", progress: 90 })
+    }
+    try {
+      await startTranscription(shortMeetingNotice.sessionId, { force: true })
+      shortMeetingNotice.onComplete?.()
+      if (shortMeetingNotice.fileId) {
+        updateFileStatus(shortMeetingNotice.fileId, { status: "complete", progress: 100 })
+      }
+      setShortMeetingNotice(null)
+    } catch (error) {
+      toast.error(t("common.error"), {
+        description: error instanceof Error ? error.message : "Unknown error",
+        duration: 8000,
+      })
+    } finally {
+      setIsOverrideRunning(false)
+    }
+  }
+
   return (
     <div className="h-[calc(100vh-3.5rem)] bg-background overflow-hidden" dir={isRTL ? "rtl" : "ltr"}>
       <div className="h-full max-w-3xl mx-auto px-4 py-6 flex flex-col">
@@ -441,6 +502,32 @@ export default function NewMeetingPage() {
 
         <Card className="flex-1 flex flex-col overflow-hidden">
           <CardContent className="p-4 flex flex-col h-full gap-4 min-h-0">
+            {shortMeetingNotice && (
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <div className="flex items-start gap-2">
+                  <Info className="mt-0.5 h-4 w-4" aria-hidden="true" />
+                  <div className="space-y-1">
+                    <p className="font-medium">Meeting too short to transcribe</p>
+                    <p className="text-xs text-amber-800">
+                      {isRTL
+                        ? "הפגישה קצרה מדי לתמלול אוטומטי. ניתן להמשיך ידנית."
+                        : "This recording is shorter than the recommended minimum. You can override to run transcription anyway."}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleShortMeetingOverride}
+                  disabled={isOverrideRunning}
+                >
+                  {isOverrideRunning
+                    ? (isRTL ? "מתחיל..." : "Starting...")
+                    : (isRTL ? "תמלל בכל זאת" : "Transcribe anyway")}
+                </Button>
+              </div>
+            )}
             <div className="flex-shrink-0 space-y-1.5">
               <Label htmlFor="title" className="flex items-center gap-1 text-sm font-medium">
                 {isRTL ? "כותרת הפגישה" : "Meeting Title"}
@@ -517,7 +604,7 @@ export default function NewMeetingPage() {
                                 <p className="text-sm font-medium truncate">{file.name}</p>
                                 <span className="text-xs text-muted-foreground">{file.size}</span>
                               </div>
-                              {["uploading", "processing"].includes(file.status) && (
+                              {["uploading", "processing", "awaiting_override"].includes(file.status) && (
                                 <div className="space-y-1">
                                   <Progress value={file.progress} className="h-1.5" />
                                   <p className="text-xs text-muted-foreground">{getStatusText(file.status)}</p>

@@ -102,6 +102,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const router = useRouter()
   const audioPlayer = useAudioPlayer()
   const { session, isLoading, error, refetch } = useSession(id, { pollWhileProcessing: true })
+  const MIN_TRANSCRIPTION_DURATION_SECONDS = 10
 
   // UI states
   const [isDeleting, setIsDeleting] = useState(false)
@@ -228,10 +229,10 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     }
   }, [showDocuments, loadAttachments])
 
-  const handleStartTranscription = async () => {
+  const handleStartTranscription = async (force: boolean = false) => {
     setIsTranscribing(true)
     try {
-      await startTranscription(id)
+      await startTranscription(id, force ? { force: true } : undefined)
       toast.success("התמלול התחיל")
       refetch()
     } catch (err) {
@@ -505,15 +506,37 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
         {session.audio_url && <AudioPlayer src={session.audio_url} onTimeUpdate={setAudioCurrentTime} />}
 
         {session.status === "pending" && session.audio_url && (
-          <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 flex items-center justify-between">
+          <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 flex items-center justify-between gap-4">
             <div>
-              <h3 className="font-medium">{t("meeting.readyToTranscribe")}</h3>
-              <p className="text-sm text-muted-foreground">{t("meeting.clickToStartTranscription")}</p>
+              {session.duration_seconds &&
+              session.duration_seconds < MIN_TRANSCRIPTION_DURATION_SECONDS ? (
+                <>
+                  <h3 className="font-medium">Meeting too short to transcribe</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {t("meeting.clickToStartTranscription")}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="font-medium">{t("meeting.readyToTranscribe")}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {t("meeting.clickToStartTranscription")}
+                  </p>
+                </>
+              )}
             </div>
-            <Button onClick={handleStartTranscription} disabled={isTranscribing}>
-              {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
-              {t("meeting.startTranscription")}
-            </Button>
+            {session.duration_seconds &&
+            session.duration_seconds < MIN_TRANSCRIPTION_DURATION_SECONDS ? (
+              <Button onClick={() => handleStartTranscription(true)} disabled={isTranscribing}>
+                {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
+                {locale === "he" ? "תמלל בכל זאת" : "Transcribe anyway"}
+              </Button>
+            ) : (
+              <Button onClick={() => handleStartTranscription(false)} disabled={isTranscribing}>
+                {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
+                {t("meeting.startTranscription")}
+              </Button>
+            )}
           </div>
         )}
 
