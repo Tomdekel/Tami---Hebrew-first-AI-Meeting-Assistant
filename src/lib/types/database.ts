@@ -1,4 +1,4 @@
-export type SessionStatus = "pending" | "recording" | "processing" | "refining" | "completed" | "failed";
+export type SessionStatus = "pending" | "recording" | "processing" | "refining" | "completed" | "failed" | "expired";
 export type Language = "he" | "en" | "auto";
 export type EntityType = "person" | "organization" | "project" | "topic" | "location" | "date" | "product" | "technology" | "other";
 export type TagSource = "manual" | "auto:person" | "auto:organization" | "auto:project" | "auto:topic";
@@ -15,6 +15,9 @@ export interface Session {
   duration_seconds: number | null;
   transcription_job_id: string | null;
   participant_count: number | null;
+  processing_started_at: string | null;
+  transcription_error: string | null;
+  transcription_error_code: string | null;
   created_at: string;
   updated_at: string;
 }

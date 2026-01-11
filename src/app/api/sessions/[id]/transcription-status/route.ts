@@ -26,6 +26,14 @@ function sanitizeNeo4jLabel(label: string): string {
   return label.replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
+const DEFAULT_PROCESSING_TIMEOUT_MINUTES = 180;
+const DEFAULT_ORPHANED_JOB_GRACE_MINUTES = 10;
+
+function parseTimeoutMinutes(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
@@ -64,8 +72,67 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     });
   }
 
+  const timeoutMinutes = parseTimeoutMinutes(
+    process.env.TRANSCRIPTION_PROCESSING_TIMEOUT_MINUTES,
+    DEFAULT_PROCESSING_TIMEOUT_MINUTES
+  );
+  const orphanedGraceMinutes = parseTimeoutMinutes(
+    process.env.TRANSCRIPTION_ORPHANED_JOB_GRACE_MINUTES,
+    DEFAULT_ORPHANED_JOB_GRACE_MINUTES
+  );
+
+  const processingStartedAt = session.processing_started_at || session.updated_at || session.created_at;
+  const processingStartTime = new Date(processingStartedAt);
+  const processingElapsedMs = Number.isNaN(processingStartTime.getTime())
+    ? 0
+    : Date.now() - processingStartTime.getTime();
+
+  if (processingElapsedMs > timeoutMinutes * 60 * 1000) {
+    const timeoutMessage = `Transcription timed out after ${timeoutMinutes} minutes. Please retry.`;
+
+    await supabase
+      .from("sessions")
+      .update({
+        status: "expired",
+        transcription_job_id: null,
+        processing_started_at: null,
+        transcription_error: timeoutMessage,
+        transcription_error_code: "timeout",
+      })
+      .eq("id", sessionId);
+
+    return NextResponse.json({
+      status: "expired",
+      completed: false,
+      error: timeoutMessage,
+      code: "TRANSCRIPTION_TIMEOUT",
+    });
+  }
+
   // If no job ID, something is wrong
   if (!session.transcription_job_id) {
+    if (processingElapsedMs > orphanedGraceMinutes * 60 * 1000) {
+      const orphanedMessage = "Transcription job was not created. Please retry.";
+
+      await supabase
+        .from("sessions")
+        .update({
+          status: "failed",
+          transcription_job_id: null,
+          processing_started_at: null,
+          transcription_error: orphanedMessage,
+          transcription_error_code: "orphaned_job",
+        })
+        .eq("id", sessionId);
+
+      return NextResponse.json({
+        status: "failed",
+        completed: false,
+        error: orphanedMessage,
+        code: "TRANSCRIPTION_JOB_ORPHANED",
+      });
+    }
+
     return NextResponse.json({
       status: "processing",
       jobStatus: "unknown",
@@ -146,6 +213,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           duration_seconds: result.duration,
           transcription_job_id: null, // Clear job ID
           participant_count: uniqueSpeakers,
+          processing_started_at: null,
+          transcription_error: null,
+          transcription_error_code: null,
         })
         .eq("id", sessionId);
 
@@ -540,6 +610,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .update({
           status: "failed",
           transcription_job_id: null,
+          processing_started_at: null,
+          transcription_error: userError,
+          transcription_error_code: jobStatus.status === "CANCELLED" ? "job_cancelled" : "job_failed",
         })
         .eq("id", sessionId);
 
