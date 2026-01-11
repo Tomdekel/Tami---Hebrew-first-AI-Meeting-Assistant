@@ -112,8 +112,28 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [showChat, setShowChat] = useState(false)
   const [showDocuments, setShowDocuments] = useState(false)
-  const [showTranscript, setShowTranscript] = useState(false)
+  const transcriptDrawerStorageKey = `meetingTranscriptDrawer:${id}`
+  const [showTranscript, setShowTranscript] = useState(() => {
+    if (typeof window === "undefined") return true
+    const storedValue = window.localStorage.getItem(transcriptDrawerStorageKey)
+    return storedValue ? storedValue === "true" : true
+  })
   const [isExporting, setIsExporting] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const storedValue = window.localStorage.getItem(transcriptDrawerStorageKey)
+    if (storedValue) {
+      setShowTranscript(storedValue === "true")
+      return
+    }
+    setShowTranscript(true)
+  }, [transcriptDrawerStorageKey])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(transcriptDrawerStorageKey, String(showTranscript))
+  }, [showTranscript, transcriptDrawerStorageKey])
 
   // Data states
   const [speakers, setSpeakers] = useState<Speaker[]>([])
