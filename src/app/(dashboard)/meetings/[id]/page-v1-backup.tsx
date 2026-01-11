@@ -427,17 +427,20 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 <>
                   <span>·</span>
                   <Badge
-                    variant={session.status === "failed" ? "destructive" : "secondary"}
+                    variant={session.status === "failed" || session.status === "expired" ? "destructive" : "secondary"}
                     className="text-xs"
                   >
                     {session.status === "processing" && (
                       <Loader2 className="h-3 w-3 me-1 animate-spin" />
                     )}
-                    {session.status === "failed" && <AlertCircle className="h-3 w-3 me-1" />}
+                    {(session.status === "failed" || session.status === "expired") && (
+                      <AlertCircle className="h-3 w-3 me-1" />
+                    )}
                     {session.status === "pending" && t("meeting.pending")}
                     {session.status === "processing" && t("meeting.processing")}
                     {session.status === "refining" && t("meeting.refining")}
                     {session.status === "failed" && t("meeting.failed")}
+                    {session.status === "expired" && t("meeting.timedOut")}
                   </Badge>
                 </>
               )}
@@ -512,13 +515,22 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
         </div>
       )}
 
-      {session.status === "failed" && (
+      {(session.status === "failed" || session.status === "expired") && (
         <div className="bg-red-50 border-b border-red-200 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="h-6 w-6 text-destructive" />
             <div>
-              <h3 className="font-medium text-destructive">{t("meeting.transcriptionFailed")}</h3>
-              <p className="text-sm text-muted-foreground">{t("meeting.transcriptionError")}</p>
+              <h3 className="font-medium text-destructive">
+                {session.status === "expired"
+                  ? t("meeting.transcriptionTimedOut")
+                  : t("meeting.transcriptionFailed")}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {session.transcription_error ||
+                  (session.status === "expired"
+                    ? t("meeting.transcriptionTimeoutDesc")
+                    : t("meeting.transcriptionError"))}
+              </p>
             </div>
           </div>
           <Button variant="outline" onClick={handleStartTranscription} disabled={isTranscribing}>

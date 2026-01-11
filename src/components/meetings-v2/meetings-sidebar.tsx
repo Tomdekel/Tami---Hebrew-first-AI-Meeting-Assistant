@@ -84,7 +84,7 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
             filteredSessions.map((session) => {
               const participantCount = getParticipantCount(session)
               const isProcessing = session.status === "processing" || session.status === "refining"
-              const isFailed = session.status === "failed"
+              const isFailed = session.status === "failed" || session.status === "expired"
 
               return (
                 <button
@@ -109,7 +109,7 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
                     {isFailed && (
                       <span className="flex items-center gap-1 text-xs text-red-600">
                         <AlertCircle className="w-3 h-3" />
-                        {t("meeting.failed")}
+                        {session.status === "expired" ? t("meeting.timedOut") : t("meeting.failed")}
                       </span>
                     )}
                   </div>

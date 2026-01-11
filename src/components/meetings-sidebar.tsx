@@ -9,6 +9,7 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  TimerOff,
   Sparkles,
   X,
 } from "lucide-react";
@@ -29,6 +30,7 @@ const statusIcons: Record<SessionStatus, React.ReactNode> = {
   refining: <Sparkles className="h-3 w-3 animate-pulse" />,
   completed: <CheckCircle2 className="h-3 w-3" />,
   failed: <XCircle className="h-3 w-3" />,
+  expired: <TimerOff className="h-3 w-3" />,
 };
 
 function formatDate(dateString: string): string {
@@ -149,7 +151,7 @@ export function MeetingsSidebar({ currentSessionId }: MeetingsSidebarProps) {
                         variant={
                           session.status === "completed"
                             ? "outline"
-                            : session.status === "failed"
+                            : session.status === "failed" || session.status === "expired"
                               ? "destructive"
                               : "secondary"
                         }

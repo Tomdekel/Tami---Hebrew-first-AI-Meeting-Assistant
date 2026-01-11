@@ -95,7 +95,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   // Update status to processing
   await supabase
     .from("sessions")
-    .update({ status: "processing" })
+    .update({
+      status: "processing",
+      processing_started_at: new Date().toISOString(),
+      transcription_error: null,
+      transcription_error_code: null,
+    })
     .eq("id", sessionId);
 
   try {
@@ -243,6 +248,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         detected_language: detectedLanguage,
         duration_seconds: result.duration,
         participant_count: uniqueSpeakers,
+        transcription_job_id: null,
+        processing_started_at: null,
+        transcription_error: null,
+        transcription_error_code: null,
       })
       .eq("id", sessionId);
 
@@ -592,13 +601,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       stack: error instanceof Error ? error.stack : undefined,
     });
 
+    const errorMessage = error instanceof Error ? error.message : "Transcription failed";
+
     // Update session status to failed
     await supabase
       .from("sessions")
-      .update({ status: "failed" })
+      .update({
+        status: "failed",
+        transcription_error: errorMessage,
+        transcription_error_code: "transcription_error",
+        processing_started_at: null,
+        transcription_job_id: null,
+      })
       .eq("id", sessionId);
 
-    const errorMessage = error instanceof Error ? error.message : "Transcription failed";
     return NextResponse.json(
       {
         error: errorMessage,
