@@ -51,9 +51,15 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
     const audio = audioRef.current
     if (!audio) return
 
-    const handleLoadedMetadata = () => {
+    const updateDuration = () => {
+      if (!Number.isFinite(audio.duration)) return
       setDuration(audio.duration)
       setIsLoaded(true)
+    }
+
+    const handleLoadedMetadata = () => {
+      updateDuration()
+      setCurrentTime(audio.currentTime)
     }
 
     const handleTimeUpdate = () => {
@@ -66,19 +72,33 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
     const handlePause = () => setIsPlaying(false)
 
     audio.addEventListener("loadedmetadata", handleLoadedMetadata)
+    audio.addEventListener("durationchange", updateDuration)
     audio.addEventListener("timeupdate", handleTimeUpdate)
     audio.addEventListener("ended", handleEnded)
     audio.addEventListener("play", handlePlay)
     audio.addEventListener("pause", handlePause)
 
+    if (audio.readyState >= 1) {
+      updateDuration()
+      setCurrentTime(audio.currentTime)
+    }
+
     return () => {
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata)
+      audio.removeEventListener("durationchange", updateDuration)
       audio.removeEventListener("timeupdate", handleTimeUpdate)
       audio.removeEventListener("ended", handleEnded)
       audio.removeEventListener("play", handlePlay)
       audio.removeEventListener("pause", handlePause)
     }
   }, [onTimeUpdate])
+
+  useEffect(() => {
+    setIsPlaying(false)
+    setCurrentTime(0)
+    setDuration(0)
+    setIsLoaded(false)
+  }, [src])
 
   useEffect(() => {
     if (audioRef.current) {
@@ -110,7 +130,8 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
     const newTime = value[0]
     audio.currentTime = newTime
     setCurrentTime(newTime)
-  }, [])
+    onTimeUpdate?.(newTime)
+  }, [onTimeUpdate])
 
   const skipBackward = useCallback(() => {
     const audio = audioRef.current
@@ -129,7 +150,8 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
     if (!audio) return
     audio.currentTime = time
     setCurrentTime(time)
-  }, [])
+    onTimeUpdate?.(time)
+  }, [onTimeUpdate])
 
   // Register seekTo method with context for transcript sync
   useEffect(() => {
