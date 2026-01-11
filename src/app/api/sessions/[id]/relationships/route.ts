@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { extractRelationships } from "@/lib/ai/relationships";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 import { runQuery, runSingleQuery } from "@/lib/neo4j/client";
 
 interface RouteParams {
@@ -163,10 +164,12 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     // Format transcript
-    const formattedTranscript = transcript.transcript_segments
-      .sort((a: { segment_order: number }, b: { segment_order: number }) =>
+    const sortedSegments = transcript.transcript_segments.sort(
+      (a: { segment_order: number }, b: { segment_order: number }) =>
         a.segment_order - b.segment_order
-      )
+    );
+    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+    const formattedTranscript = dedupedSegments
       .map((seg: { speaker_name?: string; text: string }) =>
         `${seg.speaker_name || "Speaker"}: ${seg.text}`
       )

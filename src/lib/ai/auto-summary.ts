@@ -1,11 +1,14 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { generateSummary } from "./summarize";
+import { dedupeSegmentsByTimeAndText } from "../transcription/segments";
 
 interface Segment {
   speaker_name: string;
   speaker_id: string;
   text: string;
   segment_order: number;
+  start_time?: number;
+  end_time?: number;
   is_deleted?: boolean;
 }
 
@@ -56,7 +59,7 @@ export async function generateAndSaveSummary(
 
     const { data: dbSegments } = await supabase
       .from("transcript_segments")
-      .select("speaker_name, speaker_id, text, segment_order, is_deleted")
+      .select("speaker_name, speaker_id, text, start_time, end_time, segment_order, is_deleted")
       .eq("transcript_id", transcriptId)
       .order("segment_order");
 
@@ -65,13 +68,14 @@ export async function generateAndSaveSummary(
     }
 
     // Filter out deleted segments and format for AI
-    const segments = (dbSegments as Segment[])
+    const sortedSegments = (dbSegments as Segment[])
       .filter((seg) => !seg.is_deleted)
-      .sort((a, b) => a.segment_order - b.segment_order)
-      .map((seg) => ({
-        speaker: seg.speaker_name || seg.speaker_id,
-        text: seg.text,
-      }));
+      .sort((a, b) => a.segment_order - b.segment_order);
+    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+    const segments = dedupedSegments.map((seg) => ({
+      speaker: seg.speaker_name || seg.speaker_id,
+      text: seg.text,
+    }));
 
     if (segments.length === 0) {
       return { success: false, error: "No valid segments after filtering" };

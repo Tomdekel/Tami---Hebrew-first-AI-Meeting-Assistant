@@ -4,6 +4,7 @@ import {
   generateEmbeddings,
   chunkTranscriptForEmbedding,
 } from "@/lib/ai/embeddings";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -96,6 +97,7 @@ export async function POST(request: Request, { params }: RouteParams) {
             speaker_name,
             text,
             start_time,
+            end_time,
             segment_order
           )
         )
@@ -120,29 +122,29 @@ export async function POST(request: Request, { params }: RouteParams) {
     await supabase.from("memory_embeddings").delete().eq("session_id", id);
 
     // Sort segments and prepare for chunking
-    const sortedSegments = transcript.transcript_segments
-      .sort(
-        (
-          a: { segment_order: number },
-          b: { segment_order: number }
-        ) => a.segment_order - b.segment_order
-      )
-      .map(
-        (seg: {
-          speaker_id: string;
-          speaker_name?: string;
-          text: string;
-          start_time?: number;
-        }) => ({
-          speakerId: seg.speaker_id,
-          speakerName: seg.speaker_name,
-          text: seg.text,
-          startTime: seg.start_time,
-        })
-      );
+    const sortedSegments = transcript.transcript_segments.sort(
+      (
+        a: { segment_order: number },
+        b: { segment_order: number }
+      ) => a.segment_order - b.segment_order
+    );
+    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+    const mappedSegments = dedupedSegments.map(
+      (seg: {
+        speaker_id: string;
+        speaker_name?: string;
+        text: string;
+        start_time?: number;
+      }) => ({
+        speakerId: seg.speaker_id,
+        speakerName: seg.speaker_name,
+        text: seg.text,
+        startTime: seg.start_time,
+      })
+    );
 
     // Chunk transcript for embedding
-    const chunks = chunkTranscriptForEmbedding(sortedSegments);
+    const chunks = chunkTranscriptForEmbedding(mappedSegments);
 
     if (chunks.length === 0) {
       return NextResponse.json({

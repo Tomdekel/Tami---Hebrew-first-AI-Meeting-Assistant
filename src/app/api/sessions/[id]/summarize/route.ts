@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { generateSummary } from "@/lib/ai";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -99,14 +100,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
   try {
     // Format segments for the AI
-    const segments = transcript.transcript_segments
-      .sort((a: { segment_order: number }, b: { segment_order: number }) =>
+    const sortedSegments = transcript.transcript_segments.sort(
+      (a: { segment_order: number }, b: { segment_order: number }) =>
         a.segment_order - b.segment_order
-      )
-      .map((seg: { speaker_name: string; speaker_id: string; text: string }) => ({
+    );
+    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+    const segments = dedupedSegments.map(
+      (seg: { speaker_name: string; speaker_id: string; text: string }) => ({
         speaker: seg.speaker_name || seg.speaker_id,
         text: seg.text,
-      }));
+      })
+    );
 
     // Generate summary
     const summaryResult = await generateSummary(

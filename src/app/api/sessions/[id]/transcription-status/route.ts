@@ -4,6 +4,7 @@ import { getTranscriptionService } from "@/lib/transcription";
 import { deepRefineTranscript, applyDeepRefinements } from "@/lib/transcription/refinement";
 import { generateAndSaveSummary } from "@/lib/ai";
 import { generateEmbeddings, chunkTranscriptForEmbedding } from "@/lib/ai/embeddings";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 import { extractEntities, EntityType } from "@/lib/ai/entities";
 import { extractRelationships, isValidRelationshipType } from "@/lib/ai/relationships";
 import { runSingleQuery } from "@/lib/neo4j/client";
@@ -268,7 +269,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // Fetch segments after refinement
         const { data: finalSegments } = await supabase
           .from("transcript_segments")
-          .select("speaker_id, speaker_name, text, start_time, segment_order")
+          .select("speaker_id, speaker_name, text, start_time, end_time, segment_order")
           .eq("transcript_id", transcript.id)
           .is("is_deleted", false)
           .order("segment_order");
@@ -278,7 +279,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           await supabase.from("memory_embeddings").delete().eq("session_id", sessionId);
 
           // Chunk transcript for embedding
-          const segments = finalSegments.map((seg) => ({
+          const dedupedSegments = dedupeSegmentsByTimeAndText(finalSegments);
+          const segments = dedupedSegments.map((seg) => ({
             speakerId: seg.speaker_id,
             speakerName: seg.speaker_name,
             text: seg.text,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { extractEntities } from "@/lib/ai/entities";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -136,14 +137,17 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     // Format segments for extraction
-    const segments = transcript.transcript_segments
-      .sort((a: { segment_order: number }, b: { segment_order: number }) =>
+    const sortedSegments = transcript.transcript_segments.sort(
+      (a: { segment_order: number }, b: { segment_order: number }) =>
         a.segment_order - b.segment_order
-      )
-      .map((seg: { speaker_name?: string; speaker_id: string; text: string }) => ({
+    );
+    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+    const segments = dedupedSegments.map(
+      (seg: { speaker_name?: string; speaker_id: string; text: string }) => ({
         speaker: seg.speaker_name || seg.speaker_id,
         text: seg.text,
-      }));
+      })
+    );
 
     // Extract entities
     const result = await extractEntities(

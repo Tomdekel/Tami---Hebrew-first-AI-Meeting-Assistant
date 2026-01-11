@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 import { NextRequest, NextResponse } from "next/server";
 import type { Session, SessionWithRelations } from "@/lib/types/database";
 
@@ -65,15 +66,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   const tags = sessionTags?.map((st) => st.tag).filter(Boolean) || [];
 
+  const sortedSegments = transcript?.segments?.sort(
+    (a: { segment_order: number }, b: { segment_order: number }) =>
+      a.segment_order - b.segment_order
+  ) || [];
+  const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+
   const result: SessionWithRelations = {
     ...session,
     transcript: transcript
       ? {
           ...transcript,
-          segments: transcript.segments?.sort(
-            (a: { segment_order: number }, b: { segment_order: number }) =>
-              a.segment_order - b.segment_order
-          ) || [],
+          segments: dedupedSegments,
         }
       : undefined,
     summary: summary

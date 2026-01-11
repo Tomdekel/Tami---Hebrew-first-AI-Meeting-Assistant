@@ -1,4 +1,5 @@
 import type { TranscriptResult, TranscriptionOptions, TranscriptionProvider } from "./types";
+import { normalizeTranscriptSegments } from "./segments";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/audio/transcriptions";
 
@@ -67,10 +68,16 @@ export class WhisperProvider implements TranscriptionProvider {
       end: data.duration || 0,
     }];
 
+    const normalizedSegments = normalizeTranscriptSegments(segments, {
+      maxSpeakers: options?.numSpeakers,
+    });
+
+    const fullText = normalizedSegments.map((seg) => seg.text).join(" ");
+
     return {
       language: data.language || "en",
-      segments,
-      fullText: data.text.trim(),
+      segments: normalizedSegments,
+      fullText: fullText || data.text.trim(),
       duration: data.duration || 0,
     };
   }
