@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -53,6 +54,7 @@ export async function GET(request: Request, { params }: RouteParams) {
             speaker_name,
             text,
             start_time,
+            end_time,
             segment_order
           )
         )
@@ -72,6 +74,11 @@ export async function GET(request: Request, { params }: RouteParams) {
     const transcript = session.transcripts?.[0];
     const isHebrew = session.detected_language === "he";
     const direction = isHebrew ? "rtl" : "ltr";
+    const sortedSegments = transcript?.transcript_segments?.sort(
+      (a: { segment_order: number }, b: { segment_order: number }) =>
+        a.segment_order - b.segment_order
+    ) || [];
+    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
 
     const title = session.title || "Untitled Meeting";
     const date = new Date(session.created_at).toLocaleDateString(
@@ -139,11 +146,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 
       if (includeTranscript && transcript?.transcript_segments?.length) {
         md += `## ${isHebrew ? "תמלול" : "Transcript"}\n\n`;
-        const segments = transcript.transcript_segments.sort(
-          (a: { segment_order: number }, b: { segment_order: number }) =>
-            a.segment_order - b.segment_order
-        );
-        for (const seg of segments) {
+        for (const seg of dedupedSegments) {
           const speaker = seg.speaker_name || seg.speaker_id;
           const time = formatTime(seg.start_time);
           md += `**[${time}] ${speaker}:** ${seg.text}\n\n`;
@@ -277,11 +280,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   <div class="section">
     <h2>${isHebrew ? "תמלול" : "Transcript"}</h2>
 `;
-      const segments = transcript.transcript_segments.sort(
-        (a: { segment_order: number }, b: { segment_order: number }) =>
-          a.segment_order - b.segment_order
-      );
-      for (const seg of segments) {
+      for (const seg of dedupedSegments) {
         const speaker = seg.speaker_name || seg.speaker_id;
         const time = formatTime(seg.start_time);
         html += `    <div class="transcript-segment">

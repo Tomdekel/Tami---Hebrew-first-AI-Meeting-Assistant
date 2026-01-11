@@ -1,4 +1,5 @@
 import type { TranscriptResult, TranscriptionOptions, TranscriptionProvider, TranscriptSegment } from "./types";
+import { normalizeTranscriptSegments } from "./segments";
 
 // Actual format from Ivrit AI RunPod endpoint
 interface IvritOutputSegment {
@@ -286,15 +287,19 @@ export class IvritProvider implements TranscriptionProvider {
       };
     });
 
+    const normalizedSegments = normalizeTranscriptSegments(segments);
+
     // Build full text from segments
-    const fullText = segments.map((s) => s.text).join(" ");
+    const fullText = normalizedSegments.map((s) => s.text).join(" ");
 
     // Calculate duration from last segment
-    const duration = segments.length > 0 ? segments[segments.length - 1].end : 0;
+    const duration = normalizedSegments.length > 0
+      ? normalizedSegments[normalizedSegments.length - 1].end
+      : 0;
 
     return {
       language: "he",
-      segments,
+      segments: normalizedSegments,
       fullText,
       duration,
     };

@@ -1,0 +1,30 @@
+{
+  "sessionId": "1d1025a0-ba31-4eca-a0a1-140faa239171",
+  "segments": [
+    {
+      "speaker": "Speaker 1",
+      "text": "שלום לכולם",
+      "start_time": 0,
+      "end_time": 1.24
+    },
+    {
+      "speaker": "Speaker 1",
+      "text": "שלום לכולם",
+      "start_time": 0,
+      "end_time": 1.24
+    },
+    {
+      "speaker": "Speaker 2",
+      "text": "בוקר טוב, נתחיל?",
+      "start_time": 1.3,
+      "end_time": 2.75
+    },
+    {
+      "speaker": "Speaker 12",
+      "text": "תודה, אני מצטרף.",
+      "start_time": 2.9,
+      "end_time": 3.8
+    }
+  ],
+  "notes": "Fixture for duplicate segment and speaker cap regression coverage."
+}
