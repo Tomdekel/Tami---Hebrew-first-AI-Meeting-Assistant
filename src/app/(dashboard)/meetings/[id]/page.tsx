@@ -270,6 +270,14 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     }
   }
 
+  const handleSidebarDelete = async (sessionId: string) => {
+    await deleteSession(sessionId)
+    setSessions((prev) => prev.filter((sessionItem) => sessionItem.id !== sessionId))
+    if (sessionId === id) {
+      router.push("/meetings")
+    }
+  }
+
   const handleExport = async (format: "html" | "markdown", includeTranscript: boolean = false) => {
     setIsExporting(true)
     try {
@@ -373,6 +381,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
         sessions={sessions}
         selectedId={id}
         onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
+        onDelete={handleSidebarDelete}
         isLoading={!sessionsLoaded}
       />
 
