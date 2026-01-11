@@ -5,11 +5,13 @@ import { useState, useRef, useCallback, useEffect } from "react";
 export type RecordingMode = "microphone" | "system";
 export type RecordingState = "idle" | "requesting" | "recording" | "paused" | "stopped";
 export type DurationWarningLevel = "soft" | "strong" | "final";
+export type AutoEndReason = "pause_timeout" | "page_exit" | "max_duration";
 
 // Default warning thresholds in seconds
 const DEFAULT_SOFT_WARNING = 60 * 60; // 1 hour
 const DEFAULT_STRONG_WARNING = 90 * 60; // 1.5 hours
 const DEFAULT_MAX_DURATION = 120 * 60; // 2 hours
+const DEFAULT_PAUSE_TIMEOUT = 60 * 60 * 1000; // 1 hour in milliseconds
 
 export interface DurationWarning {
   level: DurationWarningLevel;
@@ -22,10 +24,12 @@ export interface RecordingOptions {
   onChunk?: (chunk: Blob, index: number) => void;
   onError?: (error: Error) => void;
   onDurationWarning?: (warning: DurationWarning) => void;
+  onAutoEnd?: (reason: AutoEndReason) => void;
   chunkInterval?: number; // milliseconds, default 30000 (30 seconds)
   softWarningAt?: number; // seconds, default 3600 (1 hour)
   strongWarningAt?: number; // seconds, default 5400 (1.5 hours)
   maxDuration?: number; // seconds, default 7200 (2 hours), 0 to disable
+  pauseTimeout?: number; // milliseconds, default 3600000 (1 hour), 0 to disable
 }
 
 export interface UseRecordingReturn {
@@ -47,10 +51,12 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     onChunk,
     onError,
     onDurationWarning,
+    onAutoEnd,
     chunkInterval = 30000,
     softWarningAt = DEFAULT_SOFT_WARNING,
     strongWarningAt = DEFAULT_STRONG_WARNING,
     maxDuration = DEFAULT_MAX_DURATION,
+    pauseTimeout = DEFAULT_PAUSE_TIMEOUT,
   } = options;
 
   const [state, setState] = useState<RecordingState>("idle");
@@ -67,6 +73,8 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const softWarningShownRef = useRef(false);
   const strongWarningShownRef = useRef(false);
+  const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const stateRef = useRef<RecordingState>("idle");
 
   // Update duration every second while recording + check for warnings
   useEffect(() => {
@@ -139,14 +147,52 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     };
   }, [state, softWarningAt, strongWarningAt, maxDuration, onDurationWarning]);
 
+  // Keep stateRef in sync with state for use in event handlers
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   // Cleanup on unmount only - empty dependency array ensures this only runs on unmount
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
       }
+      if (pauseTimeoutRef.current) {
+        clearTimeout(pauseTimeoutRef.current);
+      }
     };
   }, []);
+
+  // Handle beforeunload - warn user if recording is active
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (stateRef.current === "recording" || stateRef.current === "paused") {
+        e.preventDefault();
+        // Modern browsers ignore custom messages, but we need to set returnValue
+        e.returnValue = "";
+        return "";
+      }
+    };
+
+    const handleUnload = () => {
+      if (stateRef.current === "recording" || stateRef.current === "paused") {
+        onAutoEnd?.("page_exit");
+        // Force stop to save recording
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("unload", handleUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("unload", handleUnload);
+    };
+  }, [onAutoEnd]);
 
   const getMicrophoneStream = async (): Promise<MediaStream> => {
     return navigator.mediaDevices.getUserMedia({
@@ -281,11 +327,28 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
       mediaRecorderRef.current.pause();
       pausedDurationRef.current += Date.now() - startTimeRef.current;
       setState("paused");
+
+      // Set auto-end timeout for extended pause
+      if (pauseTimeout > 0) {
+        pauseTimeoutRef.current = setTimeout(() => {
+          onAutoEnd?.("pause_timeout");
+          // Stop the recording after pause timeout
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.stop();
+          }
+        }, pauseTimeout);
+      }
     }
-  }, []);
+  }, [pauseTimeout, onAutoEnd]);
 
   const resume = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
+      // Clear pause timeout
+      if (pauseTimeoutRef.current) {
+        clearTimeout(pauseTimeoutRef.current);
+        pauseTimeoutRef.current = null;
+      }
+
       mediaRecorderRef.current.resume();
       startTimeRef.current = Date.now();
       setState("recording");
@@ -300,6 +363,11 @@ export function useRecording(options: RecordingOptions): UseRecordingReturn {
     // Stop any active stream
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
+    }
+    // Clear pause timeout
+    if (pauseTimeoutRef.current) {
+      clearTimeout(pauseTimeoutRef.current);
+      pauseTimeoutRef.current = null;
     }
     // Reset all state
     setAudioBlob(null);

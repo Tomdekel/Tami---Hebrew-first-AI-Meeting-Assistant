@@ -22,10 +22,13 @@ import {
   Monitor,
   Users,
   Square,
+  Pause,
+  Play,
 } from "lucide-react"
 import { toast } from "sonner"
-import { useRecording, type RecordingMode as AudioMode } from "@/hooks/use-recording"
+import { useRecording, type RecordingMode as AudioMode, type AutoEndReason } from "@/hooks/use-recording"
 import { Waveform } from "@/components/recording/waveform"
+import { IdleWaveform } from "@/components/recording/idle-waveform"
 import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio"
 import { createSession, startTranscription } from "@/hooks/use-session"
 import { createClient } from "@/lib/supabase/client"
@@ -63,6 +66,34 @@ export default function NewMeetingPage() {
   useEffect(() => {
     setMeetingLanguage(locale === "he" ? "he" : "en")
   }, [locale])
+
+  // Generate default title with date and time
+  const generateDefaultTitle = useCallback(() => {
+    const now = new Date()
+    const dateStr = now.toLocaleDateString(locale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+    const timeStr = now.toLocaleTimeString(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    return isRTL ? `הקלטה ${dateStr} ${timeStr}` : `Recording ${dateStr} ${timeStr}`
+  }, [locale, isRTL])
+
+  // Handle auto-end from recording hook
+  const handleAutoEnd = useCallback((reason: AutoEndReason) => {
+    if (reason === "pause_timeout") {
+      toast.warning(isRTL ? "ההקלטה הסתיימה אוטומטית עקב השהייה ממושכת" : "Recording ended automatically due to extended pause", {
+        duration: 8000,
+      })
+    } else if (reason === "page_exit") {
+      toast.info(isRTL ? "ההקלטה נשמרה" : "Recording saved", {
+        duration: 5000,
+      })
+    }
+  }, [isRTL])
 
   // Track chunks during recording
   const chunkCountRef = useRef(0)
@@ -254,7 +285,7 @@ export default function NewMeetingPage() {
         // Create a new session if needed
         if (!sessionIdRef.current) {
           const session = await createSession({
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || generateDefaultTitle(),
             context: meetingContext || undefined,
             detected_language: meetingLanguage,
           })
@@ -268,7 +299,7 @@ export default function NewMeetingPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audio_url: audioResult.url,
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || generateDefaultTitle(),
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
@@ -283,7 +314,7 @@ export default function NewMeetingPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audio_url: audioResult.url,
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || generateDefaultTitle(),
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
@@ -322,7 +353,7 @@ export default function NewMeetingPage() {
 
         if (index === 0 && !sessionIdRef.current) {
           const session = await createSession({
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || generateDefaultTitle(),
             detected_language: meetingLanguage,
           })
           sessionIdRef.current = session.id
@@ -367,9 +398,12 @@ export default function NewMeetingPage() {
     stream: recordingStream,
     start: startInPersonRecording,
     stop: stopInPersonRecording,
+    pause: pauseRecording,
+    resume: resumeRecording,
   } = useRecording({
     mode: audioMode || "microphone",
     onChunk: handleChunk,
+    onAutoEnd: handleAutoEnd,
     onError: (err) => {
       console.error("Recording error:", err)
       // Show user-friendly error message
@@ -628,28 +662,67 @@ export default function NewMeetingPage() {
                         </button>
                       </div>
                     </div>
-                  ) : recordingState === "recording" ? (
+                  ) : recordingState === "recording" || recordingState === "paused" ? (
                     <div className="text-center">
-                      {/* Live waveform visualization */}
+                      {/* Waveform - show idle wave when paused, live wave when recording */}
                       <div className="w-full max-w-xs mx-auto mb-4 h-20 relative">
-                        <Waveform
-                          stream={recordingStream}
-                          className="h-full"
-                          barColor="#ef4444"
-                          backgroundColor="#1f2937"
-                        />
-                        {/* Small pulsing indicator in corner */}
+                        {recordingState === "paused" ? (
+                          <IdleWaveform className="h-full" />
+                        ) : (
+                          <Waveform
+                            stream={recordingStream}
+                            className="h-full"
+                            barColor="#ef4444"
+                            backgroundColor="#1f2937"
+                          />
+                        )}
+                        {/* Status indicator in corner */}
                         <div className="absolute top-2 start-2 flex items-center gap-1.5">
-                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                          <span className="text-xs text-white/70">{isRTL ? "מקליט" : "REC"}</span>
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            recordingState === "paused" ? "bg-yellow-500" : "bg-red-500 animate-pulse"
+                          )} />
+                          <span className="text-xs text-white/70">
+                            {recordingState === "paused"
+                              ? (isRTL ? "מושהה" : "PAUSED")
+                              : (isRTL ? "מקליט" : "REC")}
+                          </span>
                         </div>
                       </div>
                       <p className="text-3xl font-mono font-bold mb-2">{formatTime(recordingDuration)}</p>
-                      <p className="text-muted-foreground mb-4">{isRTL ? "מקליט..." : "Recording..."}</p>
-                      <Button onClick={handleStopInPerson} variant="destructive">
-                        <Square className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
-                        {isRTL ? "סיים הקלטה" : "Stop Recording"}
-                      </Button>
+                      <p className="text-muted-foreground mb-4">
+                        {recordingState === "paused"
+                          ? (isRTL ? "הקלטה מושהית" : "Recording paused")
+                          : (isRTL ? "מקליט..." : "Recording...")}
+                      </p>
+
+                      {/* Pause timeout warning when paused */}
+                      {recordingState === "paused" && (
+                        <p className="text-xs text-yellow-600 mb-4">
+                          {isRTL
+                            ? "ההקלטה תסתיים אוטומטית אם לא תמשיך תוך שעה"
+                            : "Recording will end automatically if not resumed within an hour"}
+                        </p>
+                      )}
+
+                      {/* Control buttons */}
+                      <div className="flex justify-center gap-3">
+                        {recordingState === "recording" ? (
+                          <Button onClick={pauseRecording} variant="outline">
+                            <Pause className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                            {isRTL ? "השהה" : "Pause"}
+                          </Button>
+                        ) : (
+                          <Button onClick={resumeRecording} variant="outline" className="border-yellow-500 text-yellow-600 hover:bg-yellow-50">
+                            <Play className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                            {isRTL ? "המשך" : "Resume"}
+                          </Button>
+                        )}
+                        <Button onClick={handleStopInPerson} variant="destructive">
+                          <Square className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                          {isRTL ? "סיים הקלטה" : "Stop Recording"}
+                        </Button>
+                      </div>
                     </div>
                   ) : recordingMode === "online" ? (
                     <div className="text-center max-w-sm">
