@@ -276,24 +276,45 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
       const url = `/api/sessions/${id}/export?format=${format}&includeTranscript=${includeTranscript}`
       const response = await fetch(url)
 
-      if (!response.ok) throw new Error("Failed to export")
+      if (!response.ok) {
+        let errorMessage = "Failed to export"
+        try {
+          const contentType = response.headers.get("Content-Type") || ""
+          if (contentType.includes("application/json")) {
+            const data = (await response.json()) as { error?: string }
+            if (data?.error) {
+              errorMessage = data.error
+            }
+          }
+        } catch (parseError) {
+          console.warn("Failed to parse export error", parseError)
+        }
+        throw new Error(errorMessage)
+      }
 
       const blob = await response.blob()
+      const fallbackTitle = session?.title?.trim() || "meeting"
+      const defaultFilename = `${fallbackTitle}.${format === "html" ? "html" : "md"}`
       const filename =
-        response.headers.get("Content-Disposition")?.split("filename=")[1]?.replace(/"/g, "") ||
-        `meeting.${format === "html" ? "html" : "md"}`
+        response.headers
+          .get("Content-Disposition")
+          ?.split("filename=")[1]
+          ?.replace(/"/g, "") || defaultFilename
 
       const link = document.createElement("a")
-      link.href = URL.createObjectURL(blob)
+      const objectUrl = URL.createObjectURL(blob)
+      link.href = objectUrl
       link.download = filename
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      URL.revokeObjectURL(link.href)
+      URL.revokeObjectURL(objectUrl)
 
       toast.success(t("export.success"))
     } catch (err) {
-      toast.error(t("export.failed"))
+      toast.error(t("export.failed"), {
+        description: err instanceof Error ? err.message : "Unknown error",
+      })
     } finally {
       setIsExporting(false)
     }
@@ -452,8 +473,17 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Button variant="outline" size="sm" onClick={() => handleExport("html", true)}>
-                <Download className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport("html", true)}
+                disabled={isExporting}
+              >
+                {isExporting ? (
+                  <Loader2 className={cn("w-4 h-4 animate-spin", locale === "he" ? "ml-2" : "mr-2")} />
+                ) : (
+                  <Download className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+                )}
                 {t("meeting.download")}
               </Button>
               <Button
