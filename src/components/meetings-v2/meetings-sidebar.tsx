@@ -1,7 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { Search, Calendar, Clock, Users, Loader2, AlertCircle } from "lucide-react"
+import { Search, Calendar, Clock, Users, Loader2, AlertCircle, MoreVertical, Trash2 } from "lucide-react"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types/database"
@@ -11,11 +27,14 @@ interface MeetingsSidebarProps {
   sessions: Session[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onDelete?: (id: string) => Promise<void>
   isLoading?: boolean
 }
 
-export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: MeetingsSidebarProps) {
+export function MeetingsSidebar({ sessions, selectedId, onSelect, onDelete, isLoading }: MeetingsSidebarProps) {
   const [search, setSearch] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const t = useTranslations()
   const locale = useLocale()
   const isRTL = locale === "he"
@@ -43,6 +62,22 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
     // Use participant_count if available (populated after transcription)
     // Otherwise return null to hide the field
     return session.participant_count ?? null
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget || !onDelete) return
+    setIsDeleting(true)
+    try {
+      await onDelete(deleteTarget.id)
+      toast.success("הפגישה נמחקה")
+      setDeleteTarget(null)
+    } catch (err) {
+      toast.error(t("common.error"), {
+        description: err instanceof Error ? err.message : "Unknown error",
+      })
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   return (
@@ -87,63 +122,105 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
               const isFailed = session.status === "failed"
 
               return (
-                <button
-                  key={session.id}
-                  onClick={() => onSelect(session.id)}
-                  className={cn(
-                    "w-full p-3 rounded-lg transition-colors",
-                    isRTL ? "text-right" : "text-left",
-                    selectedId === session.id ? "bg-teal-50 border border-teal-200" : "hover:bg-muted"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className="font-medium text-sm text-foreground truncate flex-1">
-                      {session.title || t("meeting.untitled")}
-                    </h4>
-                    {isProcessing && (
-                      <span className="flex items-center gap-1 text-xs text-teal-600">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        {session.status === "processing" ? t("meeting.transcribing") : t("meeting.refining")}
-                      </span>
-                    )}
-                    {isFailed && (
-                      <span className="flex items-center gap-1 text-xs text-red-600">
-                        <AlertCircle className="w-3 h-3" />
-                        {t("meeting.failed")}
-                      </span>
-                    )}
-                  </div>
-                  <div
+                <div key={session.id} className="flex items-start gap-2 group">
+                  <button
+                    onClick={() => onSelect(session.id)}
                     className={cn(
-                      "flex items-center gap-3 mt-1.5 text-xs text-muted-foreground",
-                      isRTL && "flex-row-reverse justify-end"
+                      "w-full p-3 rounded-lg transition-colors flex-1",
+                      isRTL ? "text-right" : "text-left",
+                      selectedId === session.id ? "bg-teal-50 border border-teal-200" : "hover:bg-muted"
                     )}
                   >
-                    {session.created_at && (
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {formatDate(session.created_at)}
-                      </span>
-                    )}
-                    {session.duration_seconds && (
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {formatDuration(session.duration_seconds)}
-                      </span>
-                    )}
-                  </div>
-                  {participantCount !== null && participantCount > 0 && (
-                    <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
-                      <Users className="w-3 h-3" />
-                      <span>{participantCount} {t("meeting.participants")}</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-medium text-sm text-foreground truncate flex-1">
+                        {session.title || t("meeting.untitled")}
+                      </h4>
+                      {isProcessing && (
+                        <span className="flex items-center gap-1 text-xs text-teal-600">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          {session.status === "processing" ? t("meeting.transcribing") : t("meeting.refining")}
+                        </span>
+                      )}
+                      {isFailed && (
+                        <span className="flex items-center gap-1 text-xs text-red-600">
+                          <AlertCircle className="w-3 h-3" />
+                          {t("meeting.failed")}
+                        </span>
+                      )}
                     </div>
+                    <div
+                      className={cn(
+                        "flex items-center gap-3 mt-1.5 text-xs text-muted-foreground",
+                        isRTL && "flex-row-reverse justify-end"
+                      )}
+                    >
+                      {session.created_at && (
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {formatDate(session.created_at)}
+                        </span>
+                      )}
+                      {session.duration_seconds && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {formatDuration(session.duration_seconds)}
+                        </span>
+                      )}
+                    </div>
+                    {participantCount !== null && participantCount > 0 && (
+                      <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
+                        <Users className="w-3 h-3" />
+                        <span>{participantCount} {t("meeting.participants")}</span>
+                      </div>
+                    )}
+                  </button>
+                  {onDelete && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label={`${t("common.delete")} ${session.title || t("meeting.untitled")}`}
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align={isRTL ? "start" : "end"}>
+                        <DropdownMenuItem
+                          onClick={() => setDeleteTarget(session)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                          {t("common.delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
-                </button>
+                </div>
               )
             })
           )}
         </div>
       </div>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => (!open ? setDeleteTarget(null) : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("meeting.deleteMeeting")}</DialogTitle>
+            <DialogDescription>{t("meeting.deleteConfirm")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={isDeleting}>
+              {isDeleting && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
