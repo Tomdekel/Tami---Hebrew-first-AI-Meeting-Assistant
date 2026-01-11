@@ -60,6 +60,10 @@ export default function NewMeetingPage() {
   const [recordingMode, setRecordingMode] = useState<RecordingMode>(null)
   const [audioMode, setAudioMode] = useState<AudioMode | null>(null)
 
+  const getFallbackTitle = useCallback(() => {
+    return `Recording ${new Date().toLocaleString(locale)}`
+  }, [locale])
+
   useEffect(() => {
     setMeetingLanguage(locale === "he" ? "he" : "en")
   }, [locale])
@@ -254,7 +258,7 @@ export default function NewMeetingPage() {
         // Create a new session if needed
         if (!sessionIdRef.current) {
           const session = await createSession({
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || getFallbackTitle(),
             context: meetingContext || undefined,
             detected_language: meetingLanguage,
           })
@@ -268,7 +272,7 @@ export default function NewMeetingPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audio_url: audioResult.url,
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || getFallbackTitle(),
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
@@ -283,7 +287,7 @@ export default function NewMeetingPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audio_url: audioResult.url,
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || getFallbackTitle(),
             ...(meetingContext ? { context: meetingContext } : {}),
           }),
         })
@@ -304,7 +308,7 @@ export default function NewMeetingPage() {
       sessionIdRef.current = null
       failedChunksRef.current.clear()
     }
-  }, [router, t, meetingTitle, meetingContext, meetingLanguage])
+  }, [router, t, meetingTitle, meetingContext, meetingLanguage, getFallbackTitle])
 
   const handleChunk = useCallback(async (chunk: Blob, index: number) => {
     const MAX_RETRIES = 3
@@ -322,7 +326,7 @@ export default function NewMeetingPage() {
 
         if (index === 0 && !sessionIdRef.current) {
           const session = await createSession({
-            title: meetingTitle || `Recording ${new Date().toLocaleDateString()}`,
+            title: meetingTitle || getFallbackTitle(),
             detected_language: meetingLanguage,
           })
           sessionIdRef.current = session.id
@@ -356,7 +360,7 @@ export default function NewMeetingPage() {
         }
       }
     }
-  }, [meetingTitle, meetingLanguage, t])
+  }, [meetingTitle, meetingLanguage, t, getFallbackTitle])
 
   // Recording hook for in-person mode
   const {
@@ -367,6 +371,8 @@ export default function NewMeetingPage() {
     stream: recordingStream,
     start: startInPersonRecording,
     stop: stopInPersonRecording,
+    pause: pauseInPersonRecording,
+    resume: resumeInPersonRecording,
   } = useRecording({
     mode: audioMode || "microphone",
     onChunk: handleChunk,
@@ -414,6 +420,19 @@ export default function NewMeetingPage() {
     }
     stopInPersonRecording()
   }, [stopInPersonRecording, recordingDuration, t])
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (recordingState === "recording" || recordingState === "paused") {
+        stopInPersonRecording()
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [recordingState, stopInPersonRecording])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -646,10 +665,32 @@ export default function NewMeetingPage() {
                       </div>
                       <p className="text-3xl font-mono font-bold mb-2">{formatTime(recordingDuration)}</p>
                       <p className="text-muted-foreground mb-4">{isRTL ? "מקליט..." : "Recording..."}</p>
-                      <Button onClick={handleStopInPerson} variant="destructive">
-                        <Square className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
-                        {isRTL ? "סיים הקלטה" : "Stop Recording"}
-                      </Button>
+                      <div className="flex gap-2 justify-center">
+                        <Button variant="outline" onClick={pauseInPersonRecording}>
+                          {isRTL ? "השהה" : "Pause"}
+                        </Button>
+                        <Button onClick={handleStopInPerson} variant="destructive">
+                          <Square className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                          {isRTL ? "סיים הקלטה" : "Stop Recording"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : recordingState === "paused" ? (
+                    <div className="text-center">
+                      <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <Monitor className="w-5 h-5 text-yellow-600" />
+                      </div>
+                      <p className="text-3xl font-mono font-bold mb-2">{formatTime(recordingDuration)}</p>
+                      <p className="text-muted-foreground mb-4">{isRTL ? "הקלטה הושהתה" : "Recording paused"}</p>
+                      <div className="flex gap-2 justify-center">
+                        <Button onClick={resumeInPersonRecording} className="bg-teal-600 hover:bg-teal-700">
+                          {isRTL ? "המשך" : "Resume"}
+                        </Button>
+                        <Button onClick={handleStopInPerson} variant="destructive">
+                          <Square className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
+                          {isRTL ? "סיים הקלטה" : "Stop Recording"}
+                        </Button>
+                      </div>
                     </div>
                   ) : recordingMode === "online" ? (
                     <div className="text-center max-w-sm">
