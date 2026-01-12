@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types/database"
 import { useTranslations, useLocale } from "next-intl"
+import { SourceIndicator } from "@/components/source-badge"
 
 interface MeetingsSidebarProps {
   sessions: Session[]
@@ -175,6 +176,9 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, onDelete, isLo
                         <Clock className="w-3 h-3" />
                         {formatDuration(session.duration_seconds)}
                       </span>
+                    )}
+                    {session.source_type && session.source_type !== "recorded" && (
+                      <SourceIndicator sourceType={session.source_type} />
                     )}
                   </div>
                   {participantCount !== null && participantCount > 0 && (

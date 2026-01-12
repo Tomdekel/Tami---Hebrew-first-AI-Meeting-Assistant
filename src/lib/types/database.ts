@@ -4,6 +4,12 @@ export type EntityType = "person" | "organization" | "project" | "topic" | "loca
 export type TagSource = "manual" | "auto:person" | "auto:organization" | "auto:project" | "auto:topic";
 export type ChatRole = "user" | "assistant";
 
+// Transcript ingestion types
+export type SourceType = "recorded" | "imported" | "summary_only";
+export type IngestionConfidence = "high" | "medium" | "low";
+export type TranscriptOrigin = "asr" | "imported";
+export type ExternalFormat = "vtt" | "srt" | "text" | "doc" | "pdf" | "md";
+
 export interface Session {
   id: string;
   user_id: string;
@@ -15,11 +21,13 @@ export interface Session {
   duration_seconds: number | null;
   transcription_job_id: string | null;
   participant_count: number | null;
-  processing_started_at: string | null;
-  transcription_error: string | null;
-  transcription_error_code: string | null;
   created_at: string;
   updated_at: string;
+  // Transcript ingestion fields
+  source_type: SourceType;
+  source_metadata: Record<string, unknown>;
+  has_timestamps: boolean;
+  ingestion_confidence: IngestionConfidence;
 }
 
 export interface Transcript {
@@ -28,6 +36,9 @@ export interface Transcript {
   language: string | null;
   full_text: string | null;
   created_at: string;
+  // Transcript ingestion fields
+  origin: TranscriptOrigin;
+  external_format: ExternalFormat | null;
 }
 
 export interface TranscriptSegment {

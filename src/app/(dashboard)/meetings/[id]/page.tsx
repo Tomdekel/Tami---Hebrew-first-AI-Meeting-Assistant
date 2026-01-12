@@ -23,6 +23,8 @@ import {
   Info,
   ChevronLeft,
   ChevronRight,
+  Brain,
+  Menu,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -41,7 +43,14 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
 import { useSession, updateSession, deleteSession, startTranscription } from "@/hooks/use-session"
 import {
@@ -57,6 +66,8 @@ import {
 import { cn } from "@/lib/utils"
 import type { Speaker, Attachment } from "@/components/meetings-v2"
 import type { ActionItem, Summary, TranscriptSegment, Session } from "@/lib/types/database"
+import { SourceBadge } from "@/components/source-badge"
+import { TranscriptionProgress } from "@/components/transcription-progress"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -115,6 +126,8 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   // Transcript drawer is always open by default - user can close it during session
   const [showTranscript, setShowTranscript] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [mobileActiveTab, setMobileActiveTab] = useState<"insights" | "transcript" | "chat" | "documents">("insights")
 
   // Data states
   const [speakers, setSpeakers] = useState<Speaker[]>([])
@@ -222,19 +235,28 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     loadSessions()
   }, [loadSpeakers, loadActionItems, loadSessions])
 
-  // Load attachments when panel opens
+  // Load attachments when panel opens (desktop) or documents tab selected (mobile)
   useEffect(() => {
-    if (showDocuments) {
+    if (showDocuments || mobileActiveTab === "documents") {
       loadAttachments()
     }
-  }, [showDocuments, loadAttachments])
+  }, [showDocuments, mobileActiveTab, loadAttachments])
 
   const handleStartTranscription = async () => {
     setIsTranscribing(true)
     try {
       await startTranscription(id)
       toast.success("התמלול התחיל")
-      refetch()
+
+      // Add small delay before refetch to let DB update (race condition fix)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await refetch()
+
+      // If still pending after initial refetch, poll again after 2 seconds
+      // This handles cases where the status update is slow
+      setTimeout(async () => {
+        await refetch()
+      }, 2000)
     } catch (err) {
       toast.error(t("common.error"), {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -409,13 +431,38 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] bg-background" dir={locale === "he" ? "rtl" : "ltr"}>
-      <MeetingsSidebar
-        sessions={sessions}
-        selectedId={id}
-        onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
-        onDelete={handleDeleteFromSidebar}
-        isLoading={!sessionsLoaded}
-      />
+      {/* Desktop Sidebar */}
+      <div className="hidden lg:block">
+        <MeetingsSidebar
+          sessions={sessions}
+          selectedId={id}
+          onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
+          onDelete={handleDeleteFromSidebar}
+          isLoading={!sessionsLoaded}
+        />
+      </div>
+
+      {/* Mobile Sidebar Sheet */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side={locale === "he" ? "right" : "left"} className="p-0 w-80">
+          <SheetHeader className="p-4 border-b">
+            <SheetTitle>{t("nav.meetings")}</SheetTitle>
+          </SheetHeader>
+          <div className="h-[calc(100%-60px)]">
+            <MeetingsSidebar
+              sessions={sessions}
+              selectedId={id}
+              onSelect={(sessionId) => {
+                router.push(`/meetings/${sessionId}`)
+                setSidebarOpen(false)
+              }}
+              onDelete={handleDeleteFromSidebar}
+              isLoading={!sessionsLoaded}
+              className="w-full border-0"
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <div className="flex-1 flex flex-col min-w-0">
         <div className="border-b border-border bg-white px-6 py-4">
@@ -466,6 +513,13 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 <span>
                   {participantCount} {t("meeting.speakers")}
                 </span>
+                {session.source_type && session.source_type !== "recorded" && (
+                  <SourceBadge
+                    sourceType={session.source_type}
+                    confidence={session.ingestion_confidence}
+                    showConfidence={true}
+                  />
+                )}
                 {session.status !== "completed" && (
                   <Badge
                     variant={session.status === "failed" || session.status === "expired" ? "destructive" : "secondary"}
@@ -496,11 +550,24 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Mobile: Hamburger menu to open sidebar */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="lg:hidden h-11 w-11 p-0"
+                onClick={() => setSidebarOpen(true)}
+                aria-label={t("nav.openSidebar")}
+              >
+                <Menu className="w-5 h-5" />
+              </Button>
+
+              {/* Desktop: Panel toggle buttons */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handleExport("html", true)}
                 disabled={isExporting}
+                className="hidden lg:inline-flex"
               >
                 {isExporting ? (
                   <Loader2 className={cn("w-4 h-4 animate-spin", locale === "he" ? "ml-2" : "mr-2")} />
@@ -513,7 +580,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 variant={showDocuments ? "default" : "outline"}
                 size="sm"
                 onClick={() => setShowDocuments(!showDocuments)}
-                className={showDocuments ? "bg-teal-600 hover:bg-teal-700" : ""}
+                className={cn("hidden lg:inline-flex", showDocuments ? "bg-teal-600 hover:bg-teal-700" : "")}
               >
                 <FileText className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
                 {t("meeting.documents")}
@@ -522,7 +589,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 variant={showChat ? "default" : "outline"}
                 size="sm"
                 onClick={() => setShowChat(!showChat)}
-                className={showChat ? "bg-teal-600 hover:bg-teal-700" : ""}
+                className={cn("hidden lg:inline-flex", showChat ? "bg-teal-600 hover:bg-teal-700" : "")}
               >
                 <MessageSquare className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
                 {t("meeting.chat")}
@@ -531,20 +598,32 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 variant={showTranscript ? "default" : "outline"}
                 size="sm"
                 onClick={() => setShowTranscript(!showTranscript)}
-                className={showTranscript ? "bg-teal-600 hover:bg-teal-700" : ""}
+                className={cn("hidden lg:inline-flex", showTranscript ? "bg-teal-600 hover:bg-teal-700" : "")}
               >
                 {t("meeting.transcript")}
               </Button>
+
+              {/* Actions dropdown - both mobile and desktop */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm">
-                    <MoreVertical className="w-4 h-4" />
+                  <Button variant="ghost" size="sm" className="h-11 w-11 lg:h-8 lg:w-8 p-0">
+                    <MoreVertical className="w-5 h-5 lg:w-4 lg:h-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {/* Mobile: Export option in dropdown */}
+                  <DropdownMenuItem
+                    onClick={() => handleExport("html", true)}
+                    disabled={isExporting}
+                    className="lg:hidden min-h-11"
+                  >
+                    <Download className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
+                    {t("meeting.download")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="lg:hidden" />
                   <DropdownMenuItem
                     onClick={() => setDeleteDialogOpen(true)}
-                    className="text-destructive focus:text-destructive"
+                    className="text-destructive focus:text-destructive min-h-11 lg:min-h-0"
                   >
                     <Trash2 className={cn("w-4 h-4", locale === "he" ? "ml-2" : "mr-2")} />
                     {t("common.delete")}
@@ -557,16 +636,12 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
 
         {session.audio_url && <AudioPlayer src={session.audio_url} onTimeUpdate={setAudioCurrentTime} />}
 
-        {session.status === "pending" && session.audio_url && (
-          <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 flex items-center justify-between">
-            <div>
-              <h3 className="font-medium">{t("meeting.readyToTranscribe")}</h3>
-              <p className="text-sm text-muted-foreground">{t("meeting.clickToStartTranscription")}</p>
+        {/* Progress indicator for pending/processing - centered, no manual button */}
+        {(session.status === "pending" || session.status === "processing") && session.audio_url && (
+          <div className="bg-teal-50 dark:bg-teal-950/30 border-b border-teal-200 dark:border-teal-800 px-6 py-4">
+            <div className="flex items-center justify-center">
+              <TranscriptionProgress status={session.status as "pending" | "processing"} />
             </div>
-            <Button onClick={handleStartTranscription} disabled={isTranscribing}>
-              {isTranscribing && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
-              {t("meeting.startTranscription")}
-            </Button>
           </div>
         )}
 
@@ -581,10 +656,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                     : t("meeting.transcriptionFailed")}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {session.transcription_error ||
-                    (session.status === "expired"
-                      ? t("meeting.transcriptionTimeoutDesc")
-                      : t("meeting.transcriptionError"))}
+                  {session.status === "expired"
+                    ? t("meeting.transcriptionTimeoutDesc")
+                    : t("meeting.transcriptionError")}
                 </p>
               </div>
             </div>
@@ -595,7 +669,70 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
           </div>
         )}
 
-        <div className="flex-1 flex overflow-hidden">
+        {/* Mobile Tabs Layout - visible only on mobile */}
+        <Tabs
+          value={mobileActiveTab}
+          onValueChange={(v) => setMobileActiveTab(v as typeof mobileActiveTab)}
+          className="flex-1 flex flex-col overflow-hidden lg:hidden"
+        >
+          <TabsList className="flex-shrink-0 w-full h-12 p-1 bg-muted/50 border-b rounded-none justify-start gap-1">
+            <TabsTrigger value="insights" className="flex-1 h-10 data-[state=active]:bg-white gap-2">
+              <Brain className="w-4 h-4" />
+              <span className="text-xs">{t("meeting.insights")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="transcript" className="flex-1 h-10 data-[state=active]:bg-white gap-2">
+              <FileText className="w-4 h-4" />
+              <span className="text-xs">{t("meeting.transcript")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="chat" className="flex-1 h-10 data-[state=active]:bg-white gap-2">
+              <MessageSquare className="w-4 h-4" />
+              <span className="text-xs">{t("meeting.chat")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="documents" className="flex-1 h-10 data-[state=active]:bg-white gap-2">
+              <FileDown className="w-4 h-4" />
+              <span className="text-xs">{t("meeting.documents")}</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="insights" forceMount className="flex-1 overflow-y-auto p-4 data-[state=inactive]:hidden">
+            <AIInsightsPanel
+              sessionId={id}
+              summary={localSummary}
+              speakers={speakers}
+              actionItems={actionItems}
+              isLoading={!speakersLoaded || !actionItemsLoaded}
+              onSummaryChange={setLocalSummary}
+              onActionItemsChange={setActionItems}
+              onSpeakersChange={setSpeakers}
+              onRefresh={handleRefresh}
+            />
+          </TabsContent>
+
+          <TabsContent value="transcript" forceMount className="flex-1 overflow-hidden data-[state=inactive]:hidden">
+            <TranscriptPanel
+              segments={transcriptSegments}
+              currentTime={audioCurrentTime}
+              onSeek={handleSeek}
+              onEditSpeaker={handleEditSpeaker}
+            />
+          </TabsContent>
+
+          <TabsContent value="chat" forceMount className="flex-1 overflow-hidden data-[state=inactive]:hidden">
+            <MeetingChat sessionId={id} isProcessing={isProcessing} onSeek={handleSeek} />
+          </TabsContent>
+
+          <TabsContent value="documents" forceMount className="flex-1 overflow-hidden p-4 data-[state=inactive]:hidden">
+            <DocumentsPanel
+              sessionId={id}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              isLoading={!attachmentsLoaded}
+            />
+          </TabsContent>
+        </Tabs>
+
+        {/* Desktop Layout - hidden on mobile */}
+        <div className="hidden lg:flex flex-1 overflow-hidden">
           <div className="flex-1 min-w-0 overflow-y-auto p-6 bg-background">
             <AIInsightsPanel
               sessionId={id}

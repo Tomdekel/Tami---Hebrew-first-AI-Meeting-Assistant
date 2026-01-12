@@ -8,7 +8,10 @@
     "settings": "Settings",
     "privacy": "Privacy",
     "newMeeting": "New Meeting",
-    "myMeetings": "My Meetings"
+    "myMeetings": "My Meetings",
+    "previous": "Previous",
+    "next": "Next",
+    "openSidebar": "Open sidebar"
   },
   "meeting": {
     "transcript": "Transcript",
@@ -445,5 +448,41 @@
     "toggleSpeakers": "Toggle speakers",
     "toggleEntities": "Toggle entities",
     "toggleChat": "Toggle chat"
+  },
+  "meetings": {
+    "source": {
+      "recorded": "Recorded",
+      "imported": "Imported",
+      "summaryOnly": "Summary"
+    },
+    "sourceTooltip": {
+      "recorded": "Recorded and transcribed by Tami",
+      "imported": "Transcript imported from external source",
+      "summaryOnly": "Summary-only import, no full transcript"
+    },
+    "confidence": {
+      "high": "High quality",
+      "medium": "Medium quality",
+      "low": "Low quality"
+    },
+    "confidenceTooltip": {
+      "high": "Complete with timestamps and speakers",
+      "medium": "Partial information available",
+      "low": "Basic text only"
+    },
+    "import": {
+      "title": "Import Transcript",
+      "dropzone": "Drag and drop transcript file here, or click to select",
+      "supportedFormats": "VTT, SRT, TXT, MD, DOCX, PDF up to 50MB",
+      "selectFile": "Select File",
+      "success": "Transcript imported successfully!",
+      "failed": "Import failed",
+      "processing": "Processing transcript...",
+      "preview": "Preview",
+      "speakers": "Detected Speakers",
+      "segments": "segments",
+      "noSpeakersDetected": "No speakers detected",
+      "uploadTranscript": "Upload Transcript"
+    }
   }
 }

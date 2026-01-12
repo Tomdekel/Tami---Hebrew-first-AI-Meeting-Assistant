@@ -10,7 +10,8 @@
     "newMeeting": "פגישה חדשה",
     "myMeetings": "הפגישות שלי",
     "previous": "הקודם",
-    "next": "הבא"
+    "next": "הבא",
+    "openSidebar": "פתח תפריט צדדי"
   },
   "meeting": {
     "transcript": "תמלול",
@@ -457,5 +458,41 @@
     "toggleSpeakers": "הצג/הסתר דוברים",
     "toggleEntities": "הצג/הסתר ישויות",
     "toggleChat": "הצג/הסתר צ׳אט"
+  },
+  "meetings": {
+    "source": {
+      "recorded": "הוקלט",
+      "imported": "יובא",
+      "summaryOnly": "סיכום"
+    },
+    "sourceTooltip": {
+      "recorded": "הוקלט ותומלל על ידי תמי",
+      "imported": "תמלול שיובא ממקור חיצוני",
+      "summaryOnly": "ייבוא סיכום בלבד, ללא תמלול מלא"
+    },
+    "confidence": {
+      "high": "איכות גבוהה",
+      "medium": "איכות בינונית",
+      "low": "איכות נמוכה"
+    },
+    "confidenceTooltip": {
+      "high": "מלא עם חותמות זמן ודוברים",
+      "medium": "מידע חלקי זמין",
+      "low": "טקסט בסיסי בלבד"
+    },
+    "import": {
+      "title": "ייבוא תמלול",
+      "dropzone": "גרור קובץ תמלול לכאן, או לחץ לבחירה",
+      "supportedFormats": "VTT, SRT, TXT, MD, DOCX, PDF עד 50MB",
+      "selectFile": "בחר קובץ",
+      "success": "התמלול יובא בהצלחה!",
+      "failed": "הייבוא נכשל",
+      "processing": "מעבד את התמלול...",
+      "preview": "תצוגה מקדימה",
+      "speakers": "דוברים שזוהו",
+      "segments": "קטעים",
+      "noSpeakersDetected": "לא זוהו דוברים",
+      "uploadTranscript": "העלה תמלול"
+    }
   }
 }

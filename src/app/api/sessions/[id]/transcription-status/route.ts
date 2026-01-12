@@ -82,7 +82,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     DEFAULT_ORPHANED_JOB_GRACE_MINUTES
   );
 
-  const processingStartedAt = session.processing_started_at || session.updated_at || session.created_at;
+  // Use updated_at or created_at for timeout calculation (processing_started_at column doesn't exist)
+  const processingStartedAt = session.updated_at || session.created_at;
   const processingStartTime = new Date(processingStartedAt);
   const processingElapsedMs = Number.isNaN(processingStartTime.getTime())
     ? 0
@@ -96,9 +97,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .update({
         status: "expired",
         transcription_job_id: null,
-        processing_started_at: null,
-        transcription_error: timeoutMessage,
-        transcription_error_code: "timeout",
       })
       .eq("id", sessionId);
 
@@ -120,9 +118,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .update({
           status: "failed",
           transcription_job_id: null,
-          processing_started_at: null,
-          transcription_error: orphanedMessage,
-          transcription_error_code: "orphaned_job",
         })
         .eq("id", sessionId);
 
@@ -225,9 +220,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           duration_seconds: result.duration,
           transcription_job_id: null, // Clear job ID
           participant_count: uniqueSpeakers,
-          processing_started_at: null,
-          transcription_error: null,
-          transcription_error_code: null,
         })
         .eq("id", sessionId);
 
@@ -631,9 +623,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .update({
           status: "failed",
           transcription_job_id: null,
-          processing_started_at: null,
-          transcription_error: userError,
-          transcription_error_code: jobStatus.status === "CANCELLED" ? "job_cancelled" : "job_failed",
         })
         .eq("id", sessionId);
 

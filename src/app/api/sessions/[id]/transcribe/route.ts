@@ -94,15 +94,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 
   // Update status to processing
-  await supabase
+  // Note: processing_started_at column was removed - just update status
+  const { error: statusUpdateError } = await supabase
     .from("sessions")
     .update({
       status: "processing",
-      processing_started_at: new Date().toISOString(),
-      transcription_error: null,
-      transcription_error_code: null,
     })
     .eq("id", sessionId);
+
+  if (statusUpdateError) {
+    console.error("[transcribe] Failed to update status to processing:", statusUpdateError);
+    return NextResponse.json({ error: "Failed to start transcription" }, { status: 500 });
+  }
 
   try {
     // Get transcription service
@@ -260,9 +263,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         duration_seconds: result.duration,
         participant_count: uniqueSpeakers,
         transcription_job_id: null,
-        processing_started_at: null,
-        transcription_error: null,
-        transcription_error_code: null,
       })
       .eq("id", sessionId);
 
@@ -620,9 +620,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .from("sessions")
       .update({
         status: "failed",
-        transcription_error: errorMessage,
-        transcription_error_code: "transcription_error",
-        processing_started_at: null,
         transcription_job_id: null,
       })
       .eq("id", sessionId);

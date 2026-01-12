@@ -82,9 +82,6 @@ export async function POST(request: Request, { params }: RouteParams) {
             .from("sessions")
             .update({
               status: "processing",
-              processing_started_at: new Date().toISOString(),
-              transcription_error: null,
-              transcription_error_code: null,
               transcription_job_id: null,
             })
             .eq("id", id);

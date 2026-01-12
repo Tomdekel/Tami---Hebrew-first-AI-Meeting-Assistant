@@ -6,6 +6,7 @@ import type { Session, SessionWithRelations } from "@/lib/types/database";
 interface UseSessionOptions {
   pollInterval?: number;
   pollWhileProcessing?: boolean;
+  forcePolling?: boolean; // Force polling even when status is "pending" (for race condition fix)
 }
 
 interface UseSessionReturn {
@@ -19,7 +20,7 @@ export function useSession(
   sessionId: string | null,
   options: UseSessionOptions = {}
 ): UseSessionReturn {
-  const { pollInterval = 3000, pollWhileProcessing = true } = options;
+  const { pollInterval = 3000, pollWhileProcessing = true, forcePolling = false } = options;
 
   const [session, setSession] = useState<SessionWithRelations | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,8 +58,23 @@ export function useSession(
   }, [fetchSession]);
 
   // Poll while processing - check transcription status endpoint
+  // Also poll for "pending" status when audio_url exists (transcription expected soon)
+  // or when forcePolling is true (to handle race conditions)
   useEffect(() => {
-    if (!pollWhileProcessing || !session || session.status !== "processing") {
+    if (!pollWhileProcessing || !session) {
+      return;
+    }
+
+    // Determine if we should poll:
+    // 1. Status is "processing" (normal case)
+    // 2. Status is "pending" AND audio_url exists (transcription should start soon)
+    // 3. forcePolling is true (explicit force, handles race conditions)
+    const shouldPoll =
+      session.status === "processing" ||
+      (session.status === "pending" && session.audio_url) ||
+      forcePolling;
+
+    if (!shouldPoll) {
       return;
     }
 
@@ -69,8 +85,12 @@ export function useSession(
         const response = await fetch(`/api/sessions/${sessionId}/transcription-status`);
         if (response.ok) {
           const data = await response.json();
-          // If status changed, refetch the full session
-          if (data.status !== "processing") {
+          // If status changed from processing, or moved from pending to processing/completed
+          // refetch the full session
+          if (
+            data.status !== session.status ||
+            (session.status === "pending" && data.status === "processing")
+          ) {
             await fetchSession();
           }
         }
@@ -79,9 +99,12 @@ export function useSession(
       }
     };
 
+    // Run immediately once to catch any status changes
+    checkTranscriptionStatus();
+
     const interval = setInterval(checkTranscriptionStatus, pollInterval);
     return () => clearInterval(interval);
-  }, [session?.status, sessionId, pollWhileProcessing, pollInterval, fetchSession]);
+  }, [session?.status, session?.audio_url, sessionId, pollWhileProcessing, pollInterval, fetchSession, forcePolling]);
 
   return {
     session,
@@ -243,12 +266,25 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export async function startTranscription(sessionId: string): Promise<void> {
-  const response = await fetch(`/api/sessions/${sessionId}/transcribe`, {
-    method: "POST",
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to start transcription");
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/transcribe`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to start transcription");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Transcription request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

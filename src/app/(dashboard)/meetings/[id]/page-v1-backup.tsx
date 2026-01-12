@@ -526,10 +526,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                   : t("meeting.transcriptionFailed")}
               </h3>
               <p className="text-sm text-muted-foreground">
-                {session.transcription_error ||
-                  (session.status === "expired"
-                    ? t("meeting.transcriptionTimeoutDesc")
-                    : t("meeting.transcriptionError"))}
+                {session.status === "expired"
+                  ? t("meeting.transcriptionTimeoutDesc")
+                  : t("meeting.transcriptionError")}
               </p>
             </div>
           </div>

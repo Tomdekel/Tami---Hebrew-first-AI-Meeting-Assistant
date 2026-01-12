@@ -168,53 +168,58 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
   }, [seekTo, audioPlayerContext])
 
   return (
-    <div className={cn("border-b border-border bg-white px-6 py-3", className)}>
+    <div className={cn(
+      "border-b border-border bg-white px-4 py-3 lg:px-6",
+      // Sticky on mobile, relative on desktop
+      "sticky bottom-0 lg:relative z-10",
+      className
+    )}>
       <audio ref={audioRef} src={src} preload="metadata" />
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 lg:gap-4">
         {/* Playback Controls */}
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 w-8 p-0"
+            className="h-11 w-11 lg:h-8 lg:w-8 p-0"
             onClick={skipBackward}
             disabled={!isLoaded}
             aria-label={t("audio.skipBack15")}
           >
-            <RotateCcw className="h-4 w-4" />
+            <RotateCcw className="h-5 w-5 lg:h-4 lg:w-4" />
           </Button>
           <Button
             onClick={togglePlay}
-            className="h-10 w-10 rounded-full bg-teal-600 hover:bg-teal-700 p-0"
+            className="h-12 w-12 lg:h-10 lg:w-10 rounded-full bg-teal-600 hover:bg-teal-700 p-0"
             disabled={!isLoaded}
             aria-label={isPlaying ? t("audio.pause") : t("audio.play")}
           >
             {isPlaying ? (
-              <Pause className="h-4 w-4 text-white" />
+              <Pause className="h-5 w-5 lg:h-4 lg:w-4 text-white" />
             ) : (
-              <Play className="h-4 w-4 text-white me-[-2px]" />
+              <Play className="h-5 w-5 lg:h-4 lg:w-4 text-white me-[-2px]" />
             )}
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 w-8 p-0"
+            className="h-11 w-11 lg:h-8 lg:w-8 p-0"
             onClick={skipForward}
             disabled={!isLoaded}
             aria-label={t("audio.skipForward15")}
           >
-            <RotateCw className="h-4 w-4" />
+            <RotateCw className="h-5 w-5 lg:h-4 lg:w-4" />
           </Button>
         </div>
 
-        {/* Duration (total time) */}
-        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.duration")}>
+        {/* Duration (total time) - hidden on mobile to save space */}
+        <span className="hidden lg:inline text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.duration")}>
           {formatTime(duration)}
         </span>
 
         {/* Progress Bar */}
-        <div className="flex-1" dir="ltr">
+        <div className="flex-1 min-w-0" dir="ltr">
           <Slider
             value={[currentTime]}
             max={duration || 100}
@@ -226,16 +231,22 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
           />
         </div>
 
-        {/* Current Time (shows progress) */}
-        <span className="text-sm text-muted-foreground font-mono w-12" dir="ltr" aria-label={t("audio.currentTime")}>
-          {formatTime(currentTime)}
+        {/* Current Time / Duration on mobile, just Current Time on desktop */}
+        <span className="text-xs lg:text-sm text-muted-foreground font-mono whitespace-nowrap" dir="ltr" aria-label={t("audio.currentTime")}>
+          <span>{formatTime(currentTime)}</span>
+          <span className="lg:hidden">/{formatTime(duration)}</span>
         </span>
 
         {/* Speed Control */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" aria-label={t("audio.playbackSpeed", { speed: playbackSpeed })}>
-              <Gauge className="h-4 w-4" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-11 min-w-11 lg:h-8 lg:min-w-0 gap-1 px-2"
+              aria-label={t("audio.playbackSpeed", { speed: playbackSpeed })}
+            >
+              <Gauge className="h-5 w-5 lg:h-4 lg:w-4" />
               <span className="text-xs font-mono">{playbackSpeed}x</span>
             </Button>
           </DropdownMenuTrigger>
@@ -244,7 +255,10 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
               <DropdownMenuItem
                 key={speed}
                 onClick={() => setPlaybackSpeed(speed)}
-                className={playbackSpeed === speed ? "bg-teal-50 text-teal-700" : ""}
+                className={cn(
+                  "min-h-11 lg:min-h-0",
+                  playbackSpeed === speed ? "bg-teal-50 text-teal-700" : ""
+                )}
               >
                 {speed}x
               </DropdownMenuItem>
@@ -252,8 +266,8 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Volume */}
-        <div className="flex items-center gap-2" dir="ltr">
+        {/* Volume - hidden on mobile (use device controls instead) */}
+        <div className="hidden lg:flex items-center gap-2" dir="ltr">
           <Button
             variant="ghost"
             size="sm"

@@ -14,6 +14,7 @@ import {
   Upload,
   Mic,
   FileAudio,
+  FileText,
   CheckCircle2,
   Loader2,
   AlertCircle,
@@ -44,6 +45,7 @@ import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunk
 import { createSession, startTranscription } from "@/hooks/use-session"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { TranscriptUploadForm } from "@/components/transcript-upload-form"
 
 type UploadStatus = "idle" | "uploading" | "processing" | "complete" | "error"
 type RecordingMode = "in-person" | "online" | null
@@ -206,7 +208,11 @@ export default function NewMeetingPage() {
       await fetch(`/api/sessions/${session.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audio_url: audioResult.url }),
+        body: JSON.stringify({
+          audio_url: audioResult.url,
+          status: "pending",
+          duration_seconds: Math.round(estimatedDuration),
+        }),
       })
 
       updateFileStatus(fileId, { status: "processing", progress: 70 })
@@ -337,30 +343,44 @@ export default function NewMeetingPage() {
 
         audioResult = await uploadAudioBlob(blob, user.id, sessionIdRef.current)
 
-        await fetch(`/api/sessions/${sessionIdRef.current}`, {
+        const patchResponse = await fetch(`/api/sessions/${sessionIdRef.current}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audio_url: audioResult.url,
+            status: "pending",
             title: meetingTitle || generateDefaultTitle(),
             ...(meetingContext ? { context: meetingContext } : {}),
+            ...(actualDuration ? { duration_seconds: Math.round(actualDuration) } : {}),
           }),
         })
+
+        if (!patchResponse.ok) {
+          const errorData = await patchResponse.json()
+          throw new Error(errorData.error || "Failed to update session")
+        }
       } else {
         // Combine chunks (all uploaded successfully)
         audioResult = await combineAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
         await deleteAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
 
         // Update session with audio URL and context
-        await fetch(`/api/sessions/${sessionIdRef.current}`, {
+        const patchChunkResponse = await fetch(`/api/sessions/${sessionIdRef.current}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audio_url: audioResult.url,
+            status: "pending",
             title: meetingTitle || generateDefaultTitle(),
             ...(meetingContext ? { context: meetingContext } : {}),
+            ...(actualDuration ? { duration_seconds: Math.round(actualDuration) } : {}),
           }),
         })
+
+        if (!patchChunkResponse.ok) {
+          const errorData = await patchChunkResponse.json()
+          throw new Error(errorData.error || "Failed to update session")
+        }
       }
 
       toast.success(t("upload.success"))
@@ -558,6 +578,13 @@ export default function NewMeetingPage() {
                 >
                   <Mic className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} aria-hidden="true" />
                   {isRTL ? "הקלטה חיה" : "Live Recording"}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="transcript"
+                  className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-amber-600 data-[state=active]:bg-transparent py-2.5"
+                >
+                  <FileText className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} aria-hidden="true" />
+                  {isRTL ? "ייבוא תמלול" : "Import Transcript"}
                 </TabsTrigger>
               </TabsList>
 
@@ -821,6 +848,18 @@ export default function NewMeetingPage() {
                     </div>
                   )}
                 </div>
+              </TabsContent>
+
+              {/* Import Transcript Tab */}
+              <TabsContent value="transcript" className="m-0 flex-1 flex flex-col pt-4 min-h-0 overflow-y-auto">
+                <TranscriptUploadForm
+                  meetingTitle={meetingTitle}
+                  meetingContext={meetingContext}
+                  onTitleRequired={() => {
+                    setMeetingTitleError(true);
+                    setShowTitleRequired(true);
+                  }}
+                />
               </TabsContent>
             </Tabs>
 
