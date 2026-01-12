@@ -606,6 +606,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         audioUrl: session.audio_url,
       });
 
+      // Parse the error to provide a user-friendly message
+      let userError = jobStatus.error || "Transcription job failed";
+      if (jobStatus.error?.includes("No segments meet minimum duration")) {
+        userError = "ההקלטה קצרה מדי או לא מכילה דיבור מספיק לתמלול. נסה להקליט לפחות 10 שניות של דיבור רציף.";
+      } else if (jobStatus.error?.includes("Diarization failed")) {
+        userError = "לא הצלחנו לזהות דוברים בהקלטה. נסה להקליט עם דיבור ברור יותר.";
+      }
+
       // Update session status to failed
       await supabase
         .from("sessions")
@@ -617,14 +625,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           transcription_error_code: jobStatus.status === "CANCELLED" ? "job_cancelled" : "job_failed",
         })
         .eq("id", sessionId);
-
-      // Parse the error to provide a user-friendly message
-      let userError = jobStatus.error || "Transcription job failed";
-      if (jobStatus.error?.includes("No segments meet minimum duration")) {
-        userError = "ההקלטה קצרה מדי או לא מכילה דיבור מספיק לתמלול. נסה להקליט לפחות 10 שניות של דיבור רציף.";
-      } else if (jobStatus.error?.includes("Diarization failed")) {
-        userError = "לא הצלחנו לזהות דוברים בהקלטה. נסה להקליט עם דיבור ברור יותר.";
-      }
 
       return NextResponse.json({
         status: "failed",
