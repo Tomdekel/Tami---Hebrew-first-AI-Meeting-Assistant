@@ -12,9 +12,10 @@ interface MeetingsSidebarProps {
   selectedId: string | null
   onSelect: (id: string) => void
   isLoading?: boolean
+  className?: string
 }
 
-export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: MeetingsSidebarProps) {
+export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading, className }: MeetingsSidebarProps) {
   const [search, setSearch] = useState("")
   const t = useTranslations()
   const locale = useLocale()
@@ -46,7 +47,7 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading }: M
   }
 
   return (
-    <div className="w-72 flex-shrink-0 border-l border-border bg-sidebar flex flex-col h-full">
+    <div className={cn("w-72 flex-shrink-0 border-l border-border bg-sidebar flex flex-col h-full", className)}>
       {/* Search */}
       <div className="p-4 border-b border-border">
         <div className="relative">
