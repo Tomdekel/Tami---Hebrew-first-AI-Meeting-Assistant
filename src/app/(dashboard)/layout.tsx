@@ -1,7 +1,7 @@
 "use client"
 
 import { useTranslations, useLocale } from "next-intl"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { Plus, Brain, Calendar, Search, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,14 +22,8 @@ export default function DashboardLayout({
 }) {
   const t = useTranslations()
   const locale = useLocale()
-  const router = useRouter()
   const pathname = usePathname()
   const isRTL = locale === "he"
-
-  const handleLanguageChange = (nextLocale: "he" | "en") => {
-    document.cookie = `locale=${nextLocale};path=/;max-age=31536000`
-    router.refresh()
-  }
 
   return (
     <div className="min-h-screen bg-background" dir={isRTL ? "rtl" : "ltr"}>
@@ -68,27 +62,6 @@ export default function DashboardLayout({
 
           {/* Spacer */}
           <div className="flex-1" />
-
-          <div className="flex items-center gap-1 bg-muted rounded-full p-1">
-            <button
-              onClick={() => handleLanguageChange("he")}
-              className={cn(
-                "px-2.5 py-1 rounded-full text-xs font-medium transition-all",
-                locale === "he" ? "bg-teal-600 text-white" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              עב
-            </button>
-            <button
-              onClick={() => handleLanguageChange("en")}
-              className={cn(
-                "px-2.5 py-1 rounded-full text-xs font-medium transition-all",
-                locale === "en" ? "bg-teal-600 text-white" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              EN
-            </button>
-          </div>
 
           {/* New Meeting Button */}
           <Button asChild className="bg-teal-600 hover:bg-teal-700 text-white gap-2">

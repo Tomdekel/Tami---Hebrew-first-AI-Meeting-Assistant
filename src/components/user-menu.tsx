@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
-import { User, LogOut, Loader2, ChevronDown, Settings, Shield } from "lucide-react";
+import { User, LogOut, Loader2, ChevronDown, Settings, Shield, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -61,6 +61,11 @@ export function UserMenu() {
     }
   };
 
+  const handleLanguageChange = (nextLocale: "he" | "en") => {
+    document.cookie = `locale=${nextLocale};path=/;max-age=31536000`;
+    router.refresh();
+  };
+
   if (isLoading) {
     return (
       <Button variant="ghost" size="icon" disabled>
@@ -87,6 +92,7 @@ export function UserMenu() {
   const avatarUrl = user.user_metadata?.avatar_url;
 
   const displayName = user.user_metadata?.full_name || user.email?.split("@")[0];
+  const languageLabel = locale === "he" ? "שפה" : "Language";
 
   return (
     <DropdownMenu>
@@ -123,6 +129,18 @@ export function UserMenu() {
         <DropdownMenuItem onClick={() => router.push("/privacy")}>
           <Shield className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
           <span>{t("nav.privacy")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs uppercase text-muted-foreground">
+          {languageLabel}
+        </DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => handleLanguageChange("he")} className="justify-between">
+          <span>עברית</span>
+          {locale === "he" && <Check className="h-4 w-4" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleLanguageChange("en")} className="justify-between">
+          <span>English</span>
+          {locale === "en" && <Check className="h-4 w-4" />}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut} disabled={isSigningOut}>
