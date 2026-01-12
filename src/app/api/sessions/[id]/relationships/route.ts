@@ -110,7 +110,9 @@ export async function POST(request: Request, { params }: RouteParams) {
           transcript_segments (
             speaker_name,
             text,
-            segment_order
+            segment_order,
+            start_time,
+            end_time
           )
         )
       `)
@@ -168,11 +170,16 @@ export async function POST(request: Request, { params }: RouteParams) {
       (a: { segment_order: number }, b: { segment_order: number }) =>
         a.segment_order - b.segment_order
     );
-    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
+    // Cast to include time fields for deduplication
+    const segmentsWithTimes = sortedSegments as Array<{
+      text: string;
+      start_time: number;
+      end_time: number;
+      speaker_name?: string;
+    }>;
+    const dedupedSegments = dedupeSegmentsByTimeAndText(segmentsWithTimes);
     const formattedTranscript = dedupedSegments
-      .map((seg: { speaker_name?: string; text: string }) =>
-        `${seg.speaker_name || "Speaker"}: ${seg.text}`
-      )
+      .map((seg) => `${seg.speaker_name || "Speaker"}: ${seg.text}`)
       .join("\n");
 
     // Extract relationships

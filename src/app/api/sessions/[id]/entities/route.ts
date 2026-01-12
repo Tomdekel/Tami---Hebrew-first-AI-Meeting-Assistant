@@ -116,7 +116,9 @@ export async function POST(request: Request, { params }: RouteParams) {
             speaker_id,
             speaker_name,
             text,
-            segment_order
+            segment_order,
+            start_time,
+            end_time
           )
         )
       `)
@@ -141,13 +143,19 @@ export async function POST(request: Request, { params }: RouteParams) {
       (a: { segment_order: number }, b: { segment_order: number }) =>
         a.segment_order - b.segment_order
     );
-    const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
-    const segments = dedupedSegments.map(
-      (seg: { speaker_name?: string; speaker_id: string; text: string }) => ({
-        speaker: seg.speaker_name || seg.speaker_id,
-        text: seg.text,
-      })
-    );
+    // Cast to include time fields for deduplication (select includes all fields)
+    const segmentsWithTimes = sortedSegments as Array<{
+      text: string;
+      start_time: number;
+      end_time: number;
+      speaker_name?: string;
+      speaker_id: string;
+    }>;
+    const dedupedSegments = dedupeSegmentsByTimeAndText(segmentsWithTimes);
+    const segments = dedupedSegments.map((seg) => ({
+      speaker: seg.speaker_name || seg.speaker_id,
+      text: seg.text,
+    }));
 
     // Extract entities
     const result = await extractEntities(

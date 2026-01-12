@@ -7,8 +7,8 @@ interface Segment {
   speaker_id: string;
   text: string;
   segment_order: number;
-  start_time?: number;
-  end_time?: number;
+  start_time: number;
+  end_time: number;
   is_deleted?: boolean;
 }
 
