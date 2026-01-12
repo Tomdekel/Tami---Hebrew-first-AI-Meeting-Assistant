@@ -24,7 +24,18 @@ import {
   Square,
   Pause,
   Play,
+  Clock,
 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { useRecording, type RecordingMode as AudioMode, type AutoEndReason } from "@/hooks/use-recording"
 import { Waveform } from "@/components/recording/waveform"
@@ -62,6 +73,14 @@ export default function NewMeetingPage() {
   const [isProcessingRecording, setIsProcessingRecording] = useState(false)
   const [recordingMode, setRecordingMode] = useState<RecordingMode>(null)
   const [audioMode, setAudioMode] = useState<AudioMode | null>(null)
+
+  // Short meeting confirmation state
+  const [showShortMeetingDialog, setShowShortMeetingDialog] = useState(false)
+  const [shortMeetingDuration, setShortMeetingDuration] = useState(0)
+  const [pendingShortMeetingAction, setPendingShortMeetingAction] = useState<(() => Promise<void>) | null>(null)
+
+  // Minimum duration for auto-transcription (60 seconds)
+  const MIN_AUTO_TRANSCRIBE_DURATION = 60
 
   useEffect(() => {
     setMeetingLanguage(locale === "he" ? "he" : "en")
@@ -136,7 +155,7 @@ export default function NewMeetingPage() {
     )
   }, [])
 
-  const processFile = useCallback(async (file: File, fileId: string) => {
+  const processFile = useCallback(async (file: File, fileId: string, skipDurationCheck: boolean = false) => {
     try {
       // Get current user
       const supabase = createClient()
@@ -154,6 +173,18 @@ export default function NewMeetingPage() {
       if (!validation.isValid) {
         console.log("Validation details:", formatValidationDetails(validation.details))
         updateFileStatus(fileId, { status: "error", error: validation.error })
+        return
+      }
+
+      // Check if meeting is too short (< 60 seconds) and needs confirmation
+      const estimatedDuration = validation.details.duration
+      if (!skipDurationCheck && estimatedDuration < MIN_AUTO_TRANSCRIBE_DURATION && estimatedDuration > 0) {
+        setShortMeetingDuration(estimatedDuration)
+        setPendingShortMeetingAction(() => async () => {
+          await processFile(file, fileId, true)
+        })
+        setShowShortMeetingDialog(true)
+        updateFileStatus(fileId, { status: "idle", progress: 0 })
         return
       }
 
@@ -191,7 +222,7 @@ export default function NewMeetingPage() {
         error: error instanceof Error ? error.message : "Unknown error"
       })
     }
-  }, [meetingTitle, meetingContext, meetingLanguage, t, updateFileStatus])
+  }, [meetingTitle, meetingContext, meetingLanguage, t, updateFileStatus, MIN_AUTO_TRANSCRIBE_DURATION])
 
   const handleFileUpload = useCallback((files: FileList | null) => {
     if (!files) return
@@ -230,7 +261,7 @@ export default function NewMeetingPage() {
   // Track failed chunks for recovery
   const failedChunksRef = useRef<Set<number>>(new Set())
 
-  const handleRecordingComplete = useCallback(async (blob: Blob) => {
+  const handleRecordingComplete = useCallback(async (blob: Blob, skipDurationCheck: boolean = false, durationSecs?: number) => {
     setIsProcessingRecording(true)
 
     try {
@@ -256,6 +287,18 @@ export default function NewMeetingPage() {
         setIsProcessingRecording(false)
         // Reset failed chunks tracking
         failedChunksRef.current.clear()
+        return
+      }
+
+      // Check if recording is too short (< 60 seconds) and needs confirmation
+      const actualDuration = durationSecs || validation.details.duration
+      if (!skipDurationCheck && actualDuration < MIN_AUTO_TRANSCRIBE_DURATION && actualDuration > 0) {
+        setShortMeetingDuration(actualDuration)
+        setPendingShortMeetingAction(() => async () => {
+          await handleRecordingComplete(blob, true, actualDuration)
+        })
+        setShowShortMeetingDialog(true)
+        setIsProcessingRecording(false)
         return
       }
 
@@ -424,9 +467,10 @@ export default function NewMeetingPage() {
     if (inPersonAudioBlob && inPersonAudioBlob.size >= MIN_VALID_BLOB_SIZE &&
         recordingState === "stopped" && !completedRef.current && recordingMode !== null) {
       completedRef.current = true
-      handleRecordingComplete(inPersonAudioBlob)
+      // Pass the recording duration so we can check if it's too short
+      handleRecordingComplete(inPersonAudioBlob, false, recordingDuration)
     }
-  }, [inPersonAudioBlob, recordingState, handleRecordingComplete, recordingMode])
+  }, [inPersonAudioBlob, recordingState, handleRecordingComplete, recordingMode, recordingDuration])
 
   const handleStartInPerson = useCallback(async () => {
     if (!meetingTitle.trim()) {
@@ -818,6 +862,43 @@ export default function NewMeetingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Short Meeting Confirmation Dialog */}
+      <AlertDialog open={showShortMeetingDialog} onOpenChange={setShowShortMeetingDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-yellow-500" />
+              {isRTL ? "הקלטה קצרה" : "Short Recording"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isRTL
+                ? `ההקלטה קצרה מדקה (${Math.round(shortMeetingDuration)} שניות). הקלטות קצרות עשויות להכיל מעט מדי תוכן לתמלול וסיכום איכותיים. האם להמשיך בכל זאת?`
+                : `This recording is less than a minute (${Math.round(shortMeetingDuration)} seconds). Short recordings may contain too little content for quality transcription and summarization. Continue anyway?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setPendingShortMeetingAction(null)
+              setShowShortMeetingDialog(false)
+            }}>
+              {isRTL ? "ביטול" : "Cancel"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setShowShortMeetingDialog(false)
+                if (pendingShortMeetingAction) {
+                  await pendingShortMeetingAction()
+                  setPendingShortMeetingAction(null)
+                }
+              }}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              {isRTL ? "המשך בכל זאת" : "Continue Anyway"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

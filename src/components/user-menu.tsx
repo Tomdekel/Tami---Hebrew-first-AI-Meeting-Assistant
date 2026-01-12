@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
-import { User, LogOut, Loader2, ChevronDown, Settings, Shield } from "lucide-react";
+import { User, LogOut, Loader2, ChevronDown, Settings, Shield, Languages } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -45,6 +45,12 @@ export function UserMenu() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const toggleLocale = () => {
+    const newLocale = locale === "he" ? "en" : "he";
+    document.cookie = `locale=${newLocale};path=/;max-age=31536000`;
+    router.refresh();
+  };
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
@@ -123,6 +129,10 @@ export function UserMenu() {
         <DropdownMenuItem onClick={() => router.push("/privacy")}>
           <Shield className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
           <span>{t("nav.privacy")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={toggleLocale}>
+          <Languages className={isRTL ? "ml-2 h-4 w-4" : "mr-2 h-4 w-4"} />
+          <span>{locale === "he" ? "English" : "עברית"}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut} disabled={isSigningOut}>

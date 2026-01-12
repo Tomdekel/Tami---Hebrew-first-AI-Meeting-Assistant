@@ -173,7 +173,7 @@ export class IvritProvider implements TranscriptionProvider {
     const transcribe_args: Record<string, unknown> = {
       language: "he",
       diarize: true,
-      num_speakers: options?.numSpeakers || 10,
+      num_speakers: options?.numSpeakers || 2,
     };
 
     if (isUrl) {

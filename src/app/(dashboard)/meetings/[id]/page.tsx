@@ -112,28 +112,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [showChat, setShowChat] = useState(false)
   const [showDocuments, setShowDocuments] = useState(false)
-  const transcriptDrawerStorageKey = `meetingTranscriptDrawer:${id}`
-  const [showTranscript, setShowTranscript] = useState(() => {
-    if (typeof window === "undefined") return true
-    const storedValue = window.localStorage.getItem(transcriptDrawerStorageKey)
-    return storedValue ? storedValue === "true" : true
-  })
+  // Transcript drawer is always open by default - user can close it during session
+  const [showTranscript, setShowTranscript] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const storedValue = window.localStorage.getItem(transcriptDrawerStorageKey)
-    if (storedValue) {
-      setShowTranscript(storedValue === "true")
-      return
-    }
-    setShowTranscript(true)
-  }, [transcriptDrawerStorageKey])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    window.localStorage.setItem(transcriptDrawerStorageKey, String(showTranscript))
-  }, [showTranscript, transcriptDrawerStorageKey])
 
   // Data states
   const [speakers, setSpeakers] = useState<Speaker[]>([])
@@ -290,6 +271,24 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     }
   }
 
+  const handleDeleteFromSidebar = async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId)
+      toast.success("הפגישה נמחקה")
+      // Remove from local sessions list
+      setSessions(prev => prev.filter(s => s.id !== sessionId))
+      // If deleted the current session, redirect to meetings list
+      if (sessionId === id) {
+        router.push("/meetings")
+      }
+    } catch (err) {
+      toast.error(t("common.error"), {
+        description: err instanceof Error ? err.message : "Unknown error",
+      })
+      throw err // Re-throw so sidebar can handle loading state
+    }
+  }
+
   const handleExport = async (format: "html" | "markdown", includeTranscript: boolean = false) => {
     setIsExporting(true)
     try {
@@ -414,6 +413,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
         sessions={sessions}
         selectedId={id}
         onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
+        onDelete={handleDeleteFromSidebar}
         isLoading={!sessionsLoaded}
       />
 

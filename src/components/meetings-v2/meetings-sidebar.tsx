@@ -1,8 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import { Search, Calendar, Clock, Users, Loader2, AlertCircle } from "lucide-react"
+import { Search, Calendar, Clock, Users, Loader2, AlertCircle, Trash2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types/database"
 import { useTranslations, useLocale } from "next-intl"
@@ -11,15 +22,37 @@ interface MeetingsSidebarProps {
   sessions: Session[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onDelete?: (id: string) => Promise<void>
   isLoading?: boolean
   className?: string
 }
 
-export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading, className }: MeetingsSidebarProps) {
+export function MeetingsSidebar({ sessions, selectedId, onSelect, onDelete, isLoading, className }: MeetingsSidebarProps) {
   const [search, setSearch] = useState("")
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const t = useTranslations()
   const locale = useLocale()
   const isRTL = locale === "he"
+
+  const handleDeleteClick = (e: React.MouseEvent, session: Session) => {
+    e.stopPropagation()
+    setSessionToDelete(session)
+    setDeleteDialogOpen(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!sessionToDelete || !onDelete) return
+    setIsDeleting(true)
+    try {
+      await onDelete(sessionToDelete.id)
+      setDeleteDialogOpen(false)
+      setSessionToDelete(null)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   const filteredSessions = sessions.filter((s) =>
     s.title?.toLowerCase().includes(search.toLowerCase())
@@ -88,19 +121,30 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading, cla
               const isFailed = session.status === "failed" || session.status === "expired"
 
               return (
-                <button
+                <div
                   key={session.id}
-                  onClick={() => onSelect(session.id)}
                   className={cn(
-                    "w-full p-3 rounded-lg transition-colors",
+                    "group relative w-full p-3 rounded-lg transition-colors cursor-pointer",
                     isRTL ? "text-right" : "text-left",
                     selectedId === session.id ? "bg-teal-50 border border-teal-200" : "hover:bg-muted"
                   )}
+                  onClick={() => onSelect(session.id)}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h4 className="font-medium text-sm text-foreground truncate flex-1">
                       {session.title || t("meeting.untitled")}
                     </h4>
+                    {onDelete && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                        onClick={(e) => handleDeleteClick(e, session)}
+                        aria-label={t("meeting.delete")}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                     {isProcessing && (
                       <span className="flex items-center gap-1 text-xs text-teal-600">
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -139,12 +183,34 @@ export function MeetingsSidebar({ sessions, selectedId, onSelect, isLoading, cla
                       <span>{participantCount} {t("meeting.participants")}</span>
                     </div>
                   )}
-                </button>
+                </div>
               )
             })
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("meeting.deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("meeting.deleteConfirmDescription", { title: sessionToDelete?.title || t("meeting.untitled") })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : t("meeting.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

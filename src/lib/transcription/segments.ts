@@ -1,6 +1,6 @@
 import type { TranscriptSegment } from "./types";
 
-const DEFAULT_MAX_SPEAKERS = 10;
+const DEFAULT_MAX_SPEAKERS = 2;
 const TEXT_HASH_SEED = 5381;
 const TIME_PRECISION = 1000;
 

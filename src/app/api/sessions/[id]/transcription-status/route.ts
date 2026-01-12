@@ -183,6 +183,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
       // Save transcript segments (raw from ASR)
       if (result.segments.length > 0) {
+        // Delete any existing segments for this transcript to prevent duplicates
+        // This handles re-transcription scenarios and race conditions
+        const { error: deleteError } = await supabase
+          .from("transcript_segments")
+          .delete()
+          .eq("transcript_id", transcript.id);
+
+        if (deleteError) {
+          console.warn("Failed to delete existing segments:", deleteError);
+        }
+
         const segments = result.segments.map((seg, index) => ({
           transcript_id: transcript.id,
           speaker_id: seg.speaker.toLowerCase().replace(/\s+/g, "_"),

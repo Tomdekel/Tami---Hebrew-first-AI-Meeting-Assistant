@@ -52,8 +52,24 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
     if (!audio) return
 
     const handleLoadedMetadata = () => {
-      setDuration(audio.duration)
-      setIsLoaded(true)
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration)
+        setIsLoaded(true)
+      }
+    }
+
+    const handleDurationChange = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration)
+        setIsLoaded(true)
+      }
+    }
+
+    const handleCanPlay = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration)
+        setIsLoaded(true)
+      }
     }
 
     const handleTimeUpdate = () => {
@@ -66,13 +82,23 @@ export function AudioPlayer({ src, className, onTimeUpdate }: AudioPlayerProps) 
     const handlePause = () => setIsPlaying(false)
 
     audio.addEventListener("loadedmetadata", handleLoadedMetadata)
+    audio.addEventListener("durationchange", handleDurationChange)
+    audio.addEventListener("canplay", handleCanPlay)
     audio.addEventListener("timeupdate", handleTimeUpdate)
     audio.addEventListener("ended", handleEnded)
     audio.addEventListener("play", handlePlay)
     audio.addEventListener("pause", handlePause)
 
+    // Check if already loaded (for cached audio)
+    if (audio.readyState >= 1 && audio.duration && isFinite(audio.duration)) {
+      setDuration(audio.duration)
+      setIsLoaded(true)
+    }
+
     return () => {
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata)
+      audio.removeEventListener("durationchange", handleDurationChange)
+      audio.removeEventListener("canplay", handleCanPlay)
       audio.removeEventListener("timeupdate", handleTimeUpdate)
       audio.removeEventListener("ended", handleEnded)
       audio.removeEventListener("play", handlePlay)
