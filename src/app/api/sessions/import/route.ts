@@ -189,7 +189,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
-    console.error("Import failed:", error);
+    // Detailed error logging for debugging
+    console.error("[import] Import failed:", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return internalError(
       error instanceof Error ? error.message : "Failed to import transcript"
     );

@@ -9,9 +9,103 @@ import type { ExternalFormat } from "@/lib/types/database";
  * - [Speaker Name] text
  * - **Speaker Name**: text (markdown)
  * - *Speaker Name*: text (markdown)
+ * - AI transcript format (multi-line with S separator)
  *
  * Falls back to paragraph-based segmentation if no speakers detected.
  */
+
+/**
+ * Detect AI transcription format with multi-line speaker attribution
+ * Format: text, S separator, Speaker N, timestamp (MM:SS)
+ */
+function detectAITranscriptFormat(lines: string[]): boolean {
+  // Look for "S" separator followed by "Speaker N" and timestamp pattern
+  for (let i = 0; i < Math.min(50, lines.length - 2); i++) {
+    const line = lines[i].trim();
+    if (line === "S" && i + 2 < lines.length) {
+      const speakerLine = lines[i + 1].trim();
+      const timestampLine = lines[i + 2].trim();
+      if (/^Speaker \d+$/i.test(speakerLine) && /^\d{1,2}:\d{2}$/.test(timestampLine)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Parse AI transcription format with multi-line structure
+ * Structure: text content, "S" separator, "Speaker N", "MM:SS" timestamp
+ */
+function parseAITranscriptFormat(
+  lines: string[],
+  speakerSet: Set<string>
+): TranscriptSegment[] {
+  const segments: TranscriptSegment[] = [];
+  let currentTextLines: string[] = [];
+  let pendingSpeaker: string | null = null;
+  let pendingStartTime: number | null = null;
+
+  const flushSegment = () => {
+    if (currentTextLines.length > 0 && pendingSpeaker) {
+      const text = currentTextLines.join(" ").trim();
+      if (text) {
+        segments.push({
+          speaker: pendingSpeaker,
+          text,
+          startTime: pendingStartTime,
+          endTime: null,
+        });
+        speakerSet.add(pendingSpeaker);
+      }
+    }
+    currentTextLines = [];
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    // Skip empty lines
+    if (!line) {
+      i++;
+      continue;
+    }
+
+    // Check for "S" separator pattern
+    if (line === "S" && i + 2 < lines.length) {
+      const speakerLine = lines[i + 1].trim();
+      const timestampLine = lines[i + 2].trim();
+
+      const speakerMatch = speakerLine.match(/^Speaker (\d+)$/i);
+      const timestampMatch = timestampLine.match(/^(\d{1,2}):(\d{2})$/);
+
+      if (speakerMatch && timestampMatch) {
+        // Flush previous segment
+        flushSegment();
+
+        // Set up new segment
+        pendingSpeaker = `Speaker ${speakerMatch[1]}`;
+        pendingStartTime = parseInt(timestampMatch[1]) * 60 + parseInt(timestampMatch[2]);
+
+        i += 3; // Skip S, Speaker N, and timestamp
+        continue;
+      }
+    }
+
+    // Regular text line - add to current segment
+    if (line !== "S") {
+      currentTextLines.push(line);
+    }
+
+    i++;
+  }
+
+  // Flush final segment
+  flushSegment();
+
+  return segments;
+}
 
 // Regex patterns for speaker detection
 const SPEAKER_PATTERNS = [
@@ -73,14 +167,24 @@ export function parseText(
   options: ParserOptions = {}
 ): ParsedTranscript {
   const { defaultSpeakerPrefix = "Speaker" } = options;
-  const lines = content.split(/\r?\n/).filter(line => line.trim());
+  const lines = content.split(/\r?\n/);
+  const nonEmptyLines = lines.filter(line => line.trim());
   const segments: TranscriptSegment[] = [];
   const speakerSet = new Set<string>();
 
-  const isTranscript = isMeetingTranscript(lines);
-  let speakerCounter = 0;
+  // Check for AI transcript format first (multi-line with S separator)
+  const isAIFormat = detectAITranscriptFormat(nonEmptyLines);
 
-  if (isTranscript) {
+  if (isAIFormat) {
+    // Parse AI transcript format
+    const parsedSegments = parseAITranscriptFormat(nonEmptyLines, speakerSet);
+    segments.push(...parsedSegments);
+  } else {
+    // Fall back to standard parsing
+    const isTranscript = isMeetingTranscript(nonEmptyLines);
+    let speakerCounter = 0;
+
+    if (isTranscript) {
     // Parse as speaker-attributed transcript
     let currentSpeaker: string | null = null;
     let currentTextLines: string[] = [];
@@ -133,14 +237,19 @@ export function parseText(
       }
     }
   }
+  } // End of else block for non-AI format
 
   // Build full text
   const fullText = segments.map(s => s.text).join("\n");
   const hasSpeakers = speakerSet.size > 0;
+  const hasTimestamps = isAIFormat && segments.some(s => s.startTime !== null);
 
-  // Calculate confidence - no timestamps for plain text
+  // Calculate confidence
   let confidence: "high" | "medium" | "low";
-  if (hasSpeakers && fullText.length > 0) {
+  if (isAIFormat && hasSpeakers && hasTimestamps) {
+    // AI format with speakers and timestamps is high confidence
+    confidence = "high";
+  } else if (hasSpeakers && fullText.length > 0) {
     confidence = "medium";
   } else {
     confidence = "low";
@@ -149,7 +258,7 @@ export function parseText(
   return {
     segments,
     fullText,
-    hasTimestamps: false,
+    hasTimestamps,
     hasSpeakers,
     speakerNames: Array.from(speakerSet),
     confidence,
