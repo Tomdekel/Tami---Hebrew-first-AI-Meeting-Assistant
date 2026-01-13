@@ -59,27 +59,35 @@ export async function GET(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    // Get attachments
-    const { data: attachments, error } = await supabase
-      .from("attachments")
-      .select("*")
-      .eq("session_id", id)
-      .order("created_at", { ascending: false });
+    // Get attachments - wrapped in try-catch since table may not exist in production
+    try {
+      const { data: attachments, error } = await supabase
+        .from("attachments")
+        .select("*")
+        .eq("session_id", id)
+        .order("created_at", { ascending: false });
 
-    if (error) {
-      throw error;
+      if (error) {
+        // Log error and return empty array - table likely doesn't exist yet
+        console.warn("Attachments query error (returning empty):", error.code, error.message);
+        return NextResponse.json({ attachments: [] });
+      }
+
+      return NextResponse.json({
+        attachments: (attachments || []).map((att) => ({
+          id: att.id,
+          name: att.name,
+          fileUrl: att.file_url,
+          fileType: att.file_type,
+          fileSize: att.file_size,
+          createdAt: att.created_at,
+        })),
+      });
+    } catch (queryError) {
+      // Catch any unexpected errors and return empty array
+      console.warn("Attachments fetch failed (returning empty):", queryError);
+      return NextResponse.json({ attachments: [] });
     }
-
-    return NextResponse.json({
-      attachments: (attachments || []).map((att) => ({
-        id: att.id,
-        name: att.name,
-        fileUrl: att.file_url,
-        fileType: att.file_type,
-        fileSize: att.file_size,
-        createdAt: att.created_at,
-      })),
-    });
   } catch (error) {
     console.error("Get attachments error:", error);
     return NextResponse.json(
