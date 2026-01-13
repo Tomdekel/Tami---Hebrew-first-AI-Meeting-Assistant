@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useState, useCallback, useEffect } from "react"
+import { use, useState, useCallback, useEffect, useRef } from "react"
 import { useTranslations, useLocale } from "next-intl"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -52,7 +52,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
-import { useSession, updateSession, deleteSession, startTranscription } from "@/hooks/use-session"
+import { updateSession, deleteSession, startTranscription } from "@/hooks/use-session"
+import { useSessionQuery, useSessionsQuery, useSpeakersQuery, useActionItemsQuery, useInvalidateSessions } from "@/hooks/use-session-query"
+import { useUIStore } from "@/stores/ui-store"
 import {
   MeetingsSidebar,
   AIInsightsPanel,
@@ -107,12 +109,59 @@ export default function MeetingDetailPageV2Wrapper({ params }: PageProps) {
 }
 
 function MeetingDetailPageV2Content({ params }: PageProps) {
-  const { id } = use(params)
+  const { id: paramsId } = use(params)
   const t = useTranslations()
   const locale = useLocale()
   const router = useRouter()
   const audioPlayer = useAudioPlayer()
-  const { session, isLoading, error, refetch } = useSession(id, { pollWhileProcessing: true })
+
+  // Zustand store for selected meeting
+  const selectedMeetingId = useUIStore((state) => state.selectedMeetingId)
+  const setSelectedMeetingId = useUIStore((state) => state.setSelectedMeetingId)
+
+  // URL params are the source of truth for meeting ID
+  const currentMeetingId = paramsId
+
+  // Track if we've initialized from URL
+  const initializedRef = useRef(false)
+
+  // Sync Zustand store from URL param whenever it changes
+  useEffect(() => {
+    if (paramsId && paramsId !== selectedMeetingId) {
+      // Sync store to match URL - URL is always the source of truth
+      useUIStore.setState({ selectedMeetingId: paramsId })
+    }
+    initializedRef.current = true
+  }, [paramsId, selectedMeetingId])
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopstate = () => {
+      const match = window.location.pathname.match(/\/meetings\/([^/]+)/)
+      if (match?.[1]) {
+        // Use setter with updateUrl=false to avoid double pushState
+        setSelectedMeetingId(match[1], false)
+      }
+    }
+
+    window.addEventListener("popstate", handlePopstate)
+    return () => window.removeEventListener("popstate", handlePopstate)
+  }, [setSelectedMeetingId])
+
+  // React Query for session data
+  const { data: session, isLoading, error, refetch } = useSessionQuery(currentMeetingId)
+
+  // React Query for sessions list (sidebar)
+  const { data: sessions = [], isLoading: sessionsLoading } = useSessionsQuery(50)
+
+  // React Query for speakers
+  const { data: speakers = [], isLoading: speakersLoading } = useSpeakersQuery(currentMeetingId)
+
+  // React Query for action items
+  const { data: actionItems = [], isLoading: actionItemsLoading } = useActionItemsQuery(currentMeetingId)
+
+  // Cache invalidation helpers
+  const { invalidateSession, removeSessionFromList } = useInvalidateSessions()
 
   // UI states
   const [isDeleting, setIsDeleting] = useState(false)
@@ -123,24 +172,33 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [showChat, setShowChat] = useState(false)
   const [showDocuments, setShowDocuments] = useState(false)
-  // Transcript drawer is always open by default - user can close it during session
   const [showTranscript, setShowTranscript] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mobileActiveTab, setMobileActiveTab] = useState<"insights" | "transcript" | "chat" | "documents">("insights")
 
-  // Data states
-  const [speakers, setSpeakers] = useState<Speaker[]>([])
-  const [speakersLoaded, setSpeakersLoaded] = useState(false)
-  const [actionItems, setActionItems] = useState<ActionItem[]>([])
-  const [actionItemsLoaded, setActionItemsLoaded] = useState(false)
+  // Data states for items not in React Query yet
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attachmentsLoaded, setAttachmentsLoaded] = useState(false)
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const [localSpeakers, setLocalSpeakers] = useState<Speaker[]>([])
+  const [localActionItems, setLocalActionItems] = useState<ActionItem[]>([])
 
   // Local summary state for optimistic updates
   const [localSummary, setLocalSummary] = useState<Summary | null>(null)
+
+  // Sync speakers from React Query
+  useEffect(() => {
+    if (speakers.length > 0) {
+      setLocalSpeakers(speakers)
+    }
+  }, [speakers])
+
+  // Sync action items from React Query
+  useEffect(() => {
+    if (actionItems.length > 0) {
+      setLocalActionItems(actionItems)
+    }
+  }, [actionItems])
 
   // Sync summary from session
   useEffect(() => {
@@ -149,60 +207,17 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     }
   }, [session?.summary])
 
-  // Load speakers
-  const loadSpeakers = useCallback(async () => {
-    if (speakersLoaded) return
-    try {
-      const response = await fetch(`/api/sessions/${id}/speakers`)
-      if (response.ok) {
-        const data = await response.json()
-        setSpeakers(data.speakers || [])
-        setSpeakersLoaded(true)
-      }
-    } catch (err) {
-      console.error("Failed to load speakers:", err)
-    }
-  }, [id, speakersLoaded])
-
-  // Load action items
-  const loadActionItems = useCallback(async () => {
-    if (actionItemsLoaded) return
-    try {
-      const response = await fetch(`/api/sessions/${id}/action-items`)
-      if (response.ok) {
-        const data = await response.json()
-        setActionItems(
-          (data.actionItems || []).map((item: {
-            id: string
-            description: string
-            assignee: string | null
-            deadline: string | null
-            completed: boolean
-            createdAt: string
-            updatedAt: string
-          }) => ({
-            id: item.id,
-            summary_id: "",
-            description: item.description,
-            assignee: item.assignee,
-            deadline: item.deadline,
-            completed: item.completed,
-            created_at: item.createdAt,
-            updated_at: item.updatedAt,
-          }))
-        )
-        setActionItemsLoaded(true)
-      }
-    } catch (err) {
-      console.error("Failed to load action items:", err)
-    }
-  }, [id, actionItemsLoaded])
+  // Reset attachments when meeting changes
+  useEffect(() => {
+    setAttachmentsLoaded(false)
+    setAttachments([])
+  }, [currentMeetingId])
 
   // Load attachments
   const loadAttachments = useCallback(async () => {
-    if (attachmentsLoaded) return
+    if (attachmentsLoaded || !currentMeetingId) return
     try {
-      const response = await fetch(`/api/sessions/${id}/attachments`)
+      const response = await fetch(`/api/sessions/${currentMeetingId}/attachments`)
       if (response.ok) {
         const data = await response.json()
         setAttachments(data.attachments || [])
@@ -211,31 +226,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     } catch (err) {
       console.error("Failed to load attachments:", err)
     }
-  }, [id, attachmentsLoaded])
+  }, [currentMeetingId, attachmentsLoaded])
 
-  // Load all sessions for sidebar
-  const loadSessions = useCallback(async () => {
-    if (sessionsLoaded) return
-    try {
-      const response = await fetch("/api/sessions?limit=50")
-      if (response.ok) {
-        const data = await response.json()
-        setSessions(data.sessions || [])
-        setSessionsLoaded(true)
-      }
-    } catch (err) {
-      console.error("Failed to load sessions:", err)
-    }
-  }, [sessionsLoaded])
-
-  // Load data on mount
-  useEffect(() => {
-    loadSpeakers()
-    loadActionItems()
-    loadSessions()
-  }, [loadSpeakers, loadActionItems, loadSessions])
-
-  // Load attachments when panel opens (desktop) or documents tab selected (mobile)
+  // Load attachments when panel opens
   useEffect(() => {
     if (showDocuments || mobileActiveTab === "documents") {
       loadAttachments()
@@ -245,15 +238,10 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const handleStartTranscription = async () => {
     setIsTranscribing(true)
     try {
-      await startTranscription(id)
+      await startTranscription(currentMeetingId)
       toast.success("התמלול התחיל")
-
-      // Add small delay before refetch to let DB update (race condition fix)
       await new Promise(resolve => setTimeout(resolve, 500))
       await refetch()
-
-      // If still pending after initial refetch, poll again after 2 seconds
-      // This handles cases where the status update is slow
       setTimeout(async () => {
         await refetch()
       }, 2000)
@@ -268,10 +256,10 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
 
   const handleSaveTitle = async () => {
     try {
-      await updateSession(id, { title: editTitle })
+      await updateSession(currentMeetingId, { title: editTitle })
       toast.success("הכותרת עודכנה")
       setIsEditing(false)
-      refetch()
+      invalidateSession(currentMeetingId)
     } catch (err) {
       toast.error(t("common.error"), {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -282,8 +270,9 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      await deleteSession(id)
+      await deleteSession(currentMeetingId)
       toast.success("הפגישה נמחקה")
+      removeSessionFromList(currentMeetingId)
       router.push("/meetings")
     } catch (err) {
       toast.error(t("common.error"), {
@@ -297,24 +286,22 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
     try {
       await deleteSession(sessionId)
       toast.success("הפגישה נמחקה")
-      // Remove from local sessions list
-      setSessions(prev => prev.filter(s => s.id !== sessionId))
-      // If deleted the current session, redirect to meetings list
-      if (sessionId === id) {
+      removeSessionFromList(sessionId)
+      if (sessionId === currentMeetingId) {
         router.push("/meetings")
       }
     } catch (err) {
       toast.error(t("common.error"), {
         description: err instanceof Error ? err.message : "Unknown error",
       })
-      throw err // Re-throw so sidebar can handle loading state
+      throw err
     }
   }
 
   const handleExport = async (format: "html" | "markdown", includeTranscript: boolean = false) => {
     setIsExporting(true)
     try {
-      const url = `/api/sessions/${id}/export?format=${format}&includeTranscript=${includeTranscript}`
+      const url = `/api/sessions/${currentMeetingId}/export?format=${format}&includeTranscript=${includeTranscript}`
       const response = await fetch(url)
 
       if (!response.ok) {
@@ -363,7 +350,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
 
   const handleEditSpeaker = async (speakerId: string, newName: string) => {
     try {
-      const response = await fetch(`/api/sessions/${id}/speakers`, {
+      const response = await fetch(`/api/sessions/${currentMeetingId}/speakers`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ speakerId, speakerName: newName }),
@@ -372,9 +359,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
       if (!response.ok) throw new Error("Failed to update speaker")
 
       toast.success(t("speakers.renamed"))
-      setSpeakersLoaded(false)
-      loadSpeakers()
-      refetch()
+      invalidateSession(currentMeetingId)
     } catch (err) {
       toast.error(t("speakers.renameFailed"))
     }
@@ -385,12 +370,14 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   }, [audioPlayer])
 
   const handleRefresh = () => {
-    setSpeakersLoaded(false)
-    setActionItemsLoaded(false)
-    loadSpeakers()
-    loadActionItems()
-    refetch()
+    invalidateSession(currentMeetingId)
   }
+
+  // Handle sidebar meeting selection - use Next.js router for proper navigation
+  const handleSelectMeeting = useCallback((sessionId: string) => {
+    router.push(`/meetings/${sessionId}`)
+    setSidebarOpen(false)
+  }, [router])
 
   if (isLoading) {
     return (
@@ -427,7 +414,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
       is_deleted: seg.is_deleted,
     })) || []
 
-  const participantCount = speakers.length || (hasTranscript ? new Set(transcriptSegments.map((s) => s.speaker_id)).size : 0)
+  const participantCount = localSpeakers.length || (hasTranscript ? new Set(transcriptSegments.map((s) => s.speaker_id)).size : 0)
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] bg-background" dir={locale === "he" ? "rtl" : "ltr"}>
@@ -435,10 +422,10 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
       <div className="hidden lg:block">
         <MeetingsSidebar
           sessions={sessions}
-          selectedId={id}
-          onSelect={(sessionId) => router.push(`/meetings/${sessionId}`)}
+          selectedId={currentMeetingId}
+          onSelect={handleSelectMeeting}
           onDelete={handleDeleteFromSidebar}
-          isLoading={!sessionsLoaded}
+          isLoading={sessionsLoading}
         />
       </div>
 
@@ -451,13 +438,10 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
           <div className="h-[calc(100%-60px)]">
             <MeetingsSidebar
               sessions={sessions}
-              selectedId={id}
-              onSelect={(sessionId) => {
-                router.push(`/meetings/${sessionId}`)
-                setSidebarOpen(false)
-              }}
+              selectedId={currentMeetingId}
+              onSelect={handleSelectMeeting}
               onDelete={handleDeleteFromSidebar}
-              isLoading={!sessionsLoaded}
+              isLoading={sessionsLoading}
               className="w-full border-0"
             />
           </div>
@@ -696,14 +680,14 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
 
           <TabsContent value="insights" forceMount className="flex-1 overflow-y-auto p-4 data-[state=inactive]:hidden">
             <AIInsightsPanel
-              sessionId={id}
+              sessionId={currentMeetingId}
               summary={localSummary}
-              speakers={speakers}
-              actionItems={actionItems}
-              isLoading={!speakersLoaded || !actionItemsLoaded}
+              speakers={localSpeakers}
+              actionItems={localActionItems}
+              isLoading={speakersLoading || actionItemsLoading}
               onSummaryChange={setLocalSummary}
-              onActionItemsChange={setActionItems}
-              onSpeakersChange={setSpeakers}
+              onActionItemsChange={setLocalActionItems}
+              onSpeakersChange={setLocalSpeakers}
               onRefresh={handleRefresh}
             />
           </TabsContent>
@@ -718,12 +702,12 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
           </TabsContent>
 
           <TabsContent value="chat" forceMount className="flex-1 overflow-hidden data-[state=inactive]:hidden">
-            <MeetingChat sessionId={id} isProcessing={isProcessing} onSeek={handleSeek} />
+            <MeetingChat sessionId={currentMeetingId} isProcessing={isProcessing} onSeek={handleSeek} />
           </TabsContent>
 
           <TabsContent value="documents" forceMount className="flex-1 overflow-hidden p-4 data-[state=inactive]:hidden">
             <DocumentsPanel
-              sessionId={id}
+              sessionId={currentMeetingId}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               isLoading={!attachmentsLoaded}
@@ -735,14 +719,14 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
         <div className="hidden lg:flex flex-1 overflow-hidden">
           <div className="flex-1 min-w-0 overflow-y-auto p-6 bg-background">
             <AIInsightsPanel
-              sessionId={id}
+              sessionId={currentMeetingId}
               summary={localSummary}
-              speakers={speakers}
-              actionItems={actionItems}
-              isLoading={!speakersLoaded || !actionItemsLoaded}
+              speakers={localSpeakers}
+              actionItems={localActionItems}
+              isLoading={speakersLoading || actionItemsLoading}
               onSummaryChange={setLocalSummary}
-              onActionItemsChange={setActionItems}
-              onSpeakersChange={setSpeakers}
+              onActionItemsChange={setLocalActionItems}
+              onSpeakersChange={setLocalSpeakers}
               onRefresh={handleRefresh}
             />
           </div>
@@ -795,7 +779,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 </Button>
               </div>
               <DocumentsPanel
-                sessionId={id}
+                sessionId={currentMeetingId}
                 attachments={attachments}
                 onAttachmentsChange={setAttachments}
                 isLoading={!attachmentsLoaded}
@@ -812,7 +796,7 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
                 </Button>
               </div>
               <div className="h-[calc(100%-56px)]">
-                <MeetingChat sessionId={id} isProcessing={isProcessing} onSeek={handleSeek} />
+                <MeetingChat sessionId={currentMeetingId} isProcessing={isProcessing} onSeek={handleSeek} />
               </div>
             </div>
           )}
