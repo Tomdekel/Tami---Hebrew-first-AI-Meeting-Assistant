@@ -2,6 +2,15 @@
   "functions": {
     "src/app/api/sessions/[id]/attachments/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/sessions/import/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/sessions/[id]/summarize/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/sessions/[id]/transcribe/route.ts": {
+      "maxDuration": 60
     }
   }
 }
