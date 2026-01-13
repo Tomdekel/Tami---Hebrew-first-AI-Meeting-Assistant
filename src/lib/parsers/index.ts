@@ -4,7 +4,8 @@ import { parseVTT } from "./vtt-parser";
 import { parseSRT } from "./srt-parser";
 import { parseText } from "./text-parser";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
+// Note: PDFParse is dynamically imported to avoid loading pdfjs-dist
+// which requires browser APIs (DOMMatrix) not available in serverless
 
 export type { ParsedTranscript, TranscriptSegment, ParserOptions } from "./types";
 
@@ -81,8 +82,11 @@ async function extractTextFromDocx(buffer: Buffer): Promise<string> {
 
 /**
  * Extract text from a PDF file
+ * Uses dynamic import to avoid loading pdfjs-dist at module load time
  */
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  // Dynamic import to avoid serverless compatibility issues
+  const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: buffer });
   const textResult = await parser.getText();
   await parser.destroy();
