@@ -1,88 +1,52 @@
 import { test, expect } from "@playwright/test";
+import { getTestMeetingId } from "./helpers/seed-data";
+
+const TEST_MEETING_ID = getTestMeetingId();
 
 test.describe("Summary Panel", () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate to meetings list
-    await page.goto("/meetings");
-
-    // Click on the first meeting
-    const meetingLink = page.locator('a[href^="/meetings/"]').first();
-    await expect(meetingLink).toBeVisible({ timeout: 10000 });
-    await meetingLink.click();
+    // Navigate directly to the seeded test meeting
+    await page.goto(`/meetings/${TEST_MEETING_ID}`);
 
     // Wait for meeting page to load
     await page.waitForURL(/\/meetings\/[^/]+$/);
+
+    // Wait for page content to load
+    await page.waitForLoadState("networkidle");
   });
 
-  test("summary panel renders with title", async ({ page }) => {
-    // Find the summary panel by its title (סיכום)
-    const summaryHeader = page.locator("text=סיכום").first();
-    await expect(summaryHeader).toBeVisible({ timeout: 10000 });
+  test("summary panel shows AI generated badge", async ({ page }) => {
+    // Find the AI generated badge in summary
+    // Use last() to get the visible element (skip hidden duplicates)
+    const aiBadge = page.getByText(/נוצר/).last();
+    await expect(aiBadge).toBeVisible({ timeout: 10000 });
   });
 
-  test("summary panel can be collapsed and expanded", async ({ page }) => {
-    // Find the summary panel header
-    const summaryHeader = page.locator("text=סיכום").first();
-    await expect(summaryHeader).toBeVisible();
-
-    // Click to toggle
-    await summaryHeader.click();
-    // Click again
-    await summaryHeader.click();
-
-    // Panel should still be functional
-    await expect(summaryHeader).toBeVisible();
+  test("summary panel shows key points header", async ({ page }) => {
+    // Find the key points section
+    const keyPointsHeader = page.getByText("נקודות מפתח").nth(1);
+    await keyPointsHeader.scrollIntoViewIfNeeded();
+    await expect(keyPointsHeader).toBeVisible({ timeout: 10000 });
   });
 
-  test("summary shows overview section when available", async ({ page }) => {
-    // Look for overview label
-    const overviewLabel = page.locator("text=סקירה");
-
-    // If summary exists, overview should be visible
-    if (await overviewLabel.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(overviewLabel).toBeVisible();
-    }
+  test("summary overview is visible", async ({ page }) => {
+    // Look for part of the overview text
+    const overviewText = page.getByText(/פגישת צוות שבועית/).nth(1);
+    await overviewText.scrollIntoViewIfNeeded();
+    await expect(overviewText).toBeVisible({ timeout: 10000 });
   });
 
-  test("generate summary button appears when no summary", async ({ page }) => {
-    // Look for generate button
-    const generateButton = page.locator('button:has-text("צור סיכום")');
-
-    // If no summary exists, button should be visible
-    if (await generateButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(generateButton).toBeEnabled();
-    }
+  test("action items section exists", async ({ page }) => {
+    // Look for משימות (tasks) section
+    const tasksHeader = page.getByText("משימות").nth(1);
+    await tasksHeader.scrollIntoViewIfNeeded();
+    await expect(tasksHeader).toBeVisible({ timeout: 10000 });
   });
 
-  test("action items are toggleable", async ({ page }) => {
-    // Look for action item checkboxes
-    const actionCheckbox = page
-      .locator('button:has(svg[class*="square"])')
-      .first();
-
-    // Skip if no action items
-    if (!(await actionCheckbox.isVisible({ timeout: 5000 }).catch(() => false))) {
-      test.skip();
-      return;
-    }
-
-    // Click to toggle
-    await actionCheckbox.click();
-
-    // Should show success toast or update UI
-    // Wait a moment for the API call
-    await page.waitForTimeout(1000);
-  });
-
-  test("key points section displays correctly", async ({ page }) => {
-    // Look for key points label
-    const keyPointsLabel = page.locator("text=נקודות מפתח");
-
-    if (await keyPointsLabel.isVisible({ timeout: 5000 }).catch(() => false)) {
-      // Should have bullet points
-      const bullets = page.locator('li:has(span:has-text("•"))');
-      const count = await bullets.count();
-      expect(count).toBeGreaterThanOrEqual(0);
-    }
+  test("seeded action item is visible", async ({ page }) => {
+    // Look for one of the seeded action items
+    const actionItem = page.getByText(/להשלים את המודול/).nth(1);
+    await actionItem.scrollIntoViewIfNeeded();
+    await expect(actionItem).toBeVisible({ timeout: 10000 });
   });
 });

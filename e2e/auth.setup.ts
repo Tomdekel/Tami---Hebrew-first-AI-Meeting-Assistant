@@ -1,6 +1,10 @@
 import { test as setup, expect } from "@playwright/test";
+import { seedTestMeeting, getTestMeetingId } from "./helpers/seed-data";
 
 const authFile = "e2e/.auth/user.json";
+
+// Export for other tests to use
+export const TEST_MEETING_ID = getTestMeetingId();
 
 setup("authenticate", async ({ page }) => {
   // Go to login page
@@ -34,6 +38,17 @@ setup("authenticate", async ({ page }) => {
 
   // Verify we're logged in
   await expect(page).toHaveURL(/\/meetings/);
+
+  // Seed test data for E2E tests
+  if (email) {
+    console.log("[auth.setup] Seeding test data...");
+    const seededData = await seedTestMeeting(email);
+    if (seededData) {
+      console.log(`[auth.setup] Test meeting seeded: ${seededData.sessionId}`);
+    } else {
+      console.warn("[auth.setup] Failed to seed test data - tests may fail");
+    }
+  }
 
   // Save authentication state
   await page.context().storageState({ path: authFile });

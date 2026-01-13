@@ -140,7 +140,11 @@
     "mergeWith": "מזג עם דובר אחר",
     "deleteSpeaker": "מחק דובר",
     "mergeSpeakers": "מיזוג דוברים",
-    "mergeDescription": "כל ההופעות של \"{source}\" ימוזגו לתוך \"{target}\". פעולה זו אינה ניתנת לביטול."
+    "mergeTitle": "מיזוג דוברים",
+    "mergeDescription": "כל ההופעות של \"{source}\" ימוזגו לתוך \"{target}\". פעולה זו אינה ניתנת לביטול.",
+    "sourceSpeaker": "דובר מקור",
+    "targetSpeaker": "דובר יעד",
+    "selectTarget": "בחר דובר יעד..."
   },
   "audio": {
     "skipBack15": "15 שניות אחורה",

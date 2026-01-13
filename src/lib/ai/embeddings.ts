@@ -89,12 +89,14 @@ export function chunkTranscriptForEmbedding(
   }>
 ): Array<{
   text: string;
+  speakerId: string;
   speakerName: string | null;
   startTime: number | null;
   segmentIndices: number[];
 }> {
   const chunks: Array<{
     text: string;
+    speakerId: string;
     speakerName: string | null;
     startTime: number | null;
     segmentIndices: number[];
@@ -102,6 +104,7 @@ export function chunkTranscriptForEmbedding(
 
   let currentChunk: {
     texts: string[];
+    speakerId: string;
     speakerName: string | null;
     startTime: number | null;
     segmentIndices: number[];
@@ -125,6 +128,7 @@ export function chunkTranscriptForEmbedding(
       if (currentChunk && currentChunk.texts.length > 0) {
         chunks.push({
           text: currentChunk.texts.join(" "),
+          speakerId: currentChunk.speakerId,
           speakerName: currentChunk.speakerName,
           startTime: currentChunk.startTime,
           segmentIndices: currentChunk.segmentIndices,
@@ -132,6 +136,7 @@ export function chunkTranscriptForEmbedding(
       }
       currentChunk = {
         texts: [segmentText],
+        speakerId: segment.speakerId,
         speakerName: segment.speakerName || segment.speakerId,
         startTime: segment.startTime ?? null,
         segmentIndices: [i],
@@ -146,6 +151,7 @@ export function chunkTranscriptForEmbedding(
   if (currentChunk && currentChunk.texts.length > 0) {
     chunks.push({
       text: currentChunk.texts.join(" "),
+      speakerId: currentChunk.speakerId,
       speakerName: currentChunk.speakerName,
       startTime: currentChunk.startTime,
       segmentIndices: currentChunk.segmentIndices,

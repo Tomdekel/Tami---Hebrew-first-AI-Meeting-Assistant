@@ -8,6 +8,7 @@ Start here for onboarding and operational docs.
 - `Product-Flows-Map.md`: high‑level user journeys.
 
 ## Architecture & data
+- `Codebase-Architecture-Map.md`: comprehensive codebase map with Mermaid diagrams and file paths.
 - `ADR.md`: architectural decisions and tradeoffs.
 - `Data-Dictionary.md`: tables, fields, and meaning.
 

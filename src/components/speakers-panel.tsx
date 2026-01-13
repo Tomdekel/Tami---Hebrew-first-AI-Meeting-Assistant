@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Users, Edit2, GitMerge, ChevronDown, ChevronUp } from "lucide-react";
+import { Users, Edit2, GitMerge, ChevronDown, ChevronUp, UserCheck, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -16,6 +17,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -25,7 +27,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+
+interface Person {
+  id: string;
+  display_name: string;
+  normalized_key: string;
+}
 
 // Speaker colors matching transcript-viewer
 const SPEAKER_COLORS = [
@@ -43,6 +52,8 @@ interface Speaker {
   speakerId: string;
   speakerName: string;
   segmentCount: number;
+  personId?: string | null;
+  personName?: string | null;
 }
 
 interface SpeakersPanelProps {
@@ -60,6 +71,131 @@ export function SpeakersPanel({ sessionId, speakers, onSpeakersChange, onRefresh
   const [newSpeakerName, setNewSpeakerName] = useState("");
   const [mergingFrom, setMergingFrom] = useState<Speaker | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+
+  // Person assignment state
+  const [assigningSpeaker, setAssigningSpeaker] = useState<Speaker | null>(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [isLoadingPeople, setIsLoadingPeople] = useState(false);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  // Fetch people list when assignment dialog opens
+  const fetchPeople = useCallback(async () => {
+    setIsLoadingPeople(true);
+    try {
+      const response = await fetch("/api/people");
+      if (response.ok) {
+        const data = await response.json();
+        setPeople(data.people || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch people:", error);
+    } finally {
+      setIsLoadingPeople(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (assigningSpeaker) {
+      fetchPeople();
+      setNewPersonName(assigningSpeaker.speakerName);
+    }
+  }, [assigningSpeaker, fetchPeople]);
+
+  // Assign speaker to existing person
+  const handleAssignToPerson = async (person: Person) => {
+    if (!assigningSpeaker) return;
+    setIsAssigning(true);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/speakers/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          speakerId: assigningSpeaker.speakerId,
+          personId: person.id,
+          personName: person.display_name,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to assign speaker");
+
+      toast.success(t("speakers.assigned") || "Speaker assigned to person");
+      onSpeakersChange(
+        speakers.map((s) =>
+          s.speakerId === assigningSpeaker.speakerId
+            ? { ...s, personId: person.id, personName: person.display_name }
+            : s
+        )
+      );
+      setAssigningSpeaker(null);
+      onRefresh();
+    } catch {
+      toast.error(t("speakers.assignFailed") || "Failed to assign speaker");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // Create new person and assign speaker
+  const handleCreateAndAssign = async () => {
+    if (!assigningSpeaker || !newPersonName.trim()) return;
+    setIsAssigning(true);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/speakers/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          speakerId: assigningSpeaker.speakerId,
+          personName: newPersonName.trim(),
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to assign speaker");
+
+      const data = await response.json();
+      toast.success(t("speakers.assigned") || "Speaker assigned to new person");
+      onSpeakersChange(
+        speakers.map((s) =>
+          s.speakerId === assigningSpeaker.speakerId
+            ? { ...s, personId: data.personId, personName: newPersonName.trim() }
+            : s
+        )
+      );
+      setAssigningSpeaker(null);
+      onRefresh();
+    } catch {
+      toast.error(t("speakers.assignFailed") || "Failed to assign speaker");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // Unassign speaker from person
+  const handleUnassign = async (speaker: Speaker) => {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/speakers/assign`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          speakerId: speaker.speakerId,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to unassign speaker");
+
+      toast.success(t("speakers.unassigned") || "Speaker unassigned");
+      onSpeakersChange(
+        speakers.map((s) =>
+          s.speakerId === speaker.speakerId
+            ? { ...s, personId: null, personName: null }
+            : s
+        )
+      );
+      onRefresh();
+    } catch {
+      toast.error(t("speakers.unassignFailed") || "Failed to unassign speaker");
+    }
+  };
 
   const getSpeakerColor = (index: number) => SPEAKER_COLORS[index % SPEAKER_COLORS.length];
 
@@ -175,19 +311,48 @@ export function SpeakersPanel({ sessionId, speakers, onSpeakersChange, onRefresh
                       key={speaker.speakerId}
                       className="flex items-center justify-between p-2 rounded-lg border text-sm"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <div
                           className="h-3 w-3 rounded-full shrink-0"
                           style={{ backgroundColor: getSpeakerColor(index) }}
                         />
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{speaker.speakerName}</p>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium truncate">{speaker.speakerName}</p>
+                            {speaker.personId && speaker.personName && (
+                              <Badge variant="secondary" className="text-xs gap-1 shrink-0">
+                                <UserCheck className="h-3 w-3" />
+                                {speaker.personName}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleUnassign(speaker);
+                                  }}
+                                  className="hover:bg-muted rounded-full p-0.5 -me-1"
+                                  title={t("speakers.unassign") || "Unassign"}
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </Badge>
+                            )}
+                          </div>
                           <p className="text-xs text-muted-foreground">
                             {speaker.segmentCount} {t("meeting.segments")}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 shrink-0">
+                        {!speaker.personId && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => setAssigningSpeaker(speaker)}
+                            title={t("speakers.assignPerson") || "Assign to person"}
+                          >
+                            <UserPlus className="h-3 w-3" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -279,6 +444,76 @@ export function SpeakersPanel({ sessionId, speakers, onSpeakersChange, onRefresh
             </Button>
             <Button onClick={handleRenameSpeaker} disabled={!newSpeakerName.trim()}>
               {t("common.save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign to Person Dialog */}
+      <Dialog open={!!assigningSpeaker} onOpenChange={() => setAssigningSpeaker(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("speakers.assignToPerson") || "Assign to Person"}</DialogTitle>
+            <DialogDescription>
+              {t("speakers.assignDescription") || `Link "${assigningSpeaker?.speakerName}" to a person for better search across all meetings.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            {/* Create new person */}
+            <div>
+              <Label htmlFor="newPersonName">{t("speakers.createNewPerson") || "Create new person"}</Label>
+              <div className="flex gap-2 mt-2">
+                <Input
+                  id="newPersonName"
+                  value={newPersonName}
+                  onChange={(e) => setNewPersonName(e.target.value)}
+                  placeholder={t("speakers.personName") || "Person name"}
+                  className="flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newPersonName.trim()) {
+                      handleCreateAndAssign();
+                    }
+                  }}
+                />
+                <Button
+                  onClick={handleCreateAndAssign}
+                  disabled={!newPersonName.trim() || isAssigning}
+                >
+                  <UserPlus className="h-4 w-4 me-2" />
+                  {t("common.create") || "Create"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Existing people list */}
+            {people.length > 0 && (
+              <div>
+                <Label>{t("speakers.orSelectExisting") || "Or select existing person"}</Label>
+                <div className="mt-2 max-h-48 overflow-y-auto border rounded-lg">
+                  {isLoadingPeople ? (
+                    <p className="text-sm text-muted-foreground p-3 text-center">
+                      {t("common.loading") || "Loading..."}
+                    </p>
+                  ) : (
+                    people.map((person) => (
+                      <button
+                        key={person.id}
+                        onClick={() => handleAssignToPerson(person)}
+                        disabled={isAssigning}
+                        className="w-full text-start px-3 py-2 hover:bg-muted border-b last:border-b-0 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <UserCheck className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">{person.display_name}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssigningSpeaker(null)}>
+              {t("common.cancel")}
             </Button>
           </DialogFooter>
         </DialogContent>

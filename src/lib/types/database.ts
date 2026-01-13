@@ -133,12 +133,65 @@ export interface ChatMessage {
   created_at: string;
 }
 
+export interface MemoryEmbeddingMetadata {
+  speakerName?: string;
+  speaker_id?: string;
+  person_id?: string;
+  startTime?: number;
+  segmentIndices?: number[];
+  source_type?: "transcript" | "attachment";
+  attachment_id?: string;
+  attachment_name?: string;
+  chunk_index?: number;
+}
+
 export interface MemoryEmbedding {
   id: string;
   user_id: string;
   session_id: string;
-  chunk_text: string;
+  content: string;  // Note: actual column name is "content", not "chunk_text"
   embedding: number[];
+  metadata: MemoryEmbeddingMetadata;
+  created_at: string;
+}
+
+// Person-based retrieval types
+export interface Person {
+  id: string;
+  user_id: string;
+  display_name: string;
+  normalized_key: string;
+  aliases: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionSpeaker {
+  id: string;
+  session_id: string;
+  speaker_id: string;
+  label: string;
+  person_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionPerson {
+  session_id: string;
+  person_id: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SpeakerAssignmentEvent {
+  id: string;
+  user_id: string;
+  session_id: string;
+  speaker_id: string;
+  old_person_id: string | null;
+  new_person_id: string | null;
   created_at: string;
 }
 

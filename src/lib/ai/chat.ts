@@ -249,6 +249,130 @@ Important:
 }
 
 /**
+ * Answer a question about specific person(s) using ONLY filtered sessions
+ * CRITICAL: This function includes guardrails to prevent semantic fallback
+ */
+export async function answerPersonFilteredQuestion(
+  question: string,
+  retrievedContext: GlobalRetrievedContext[],
+  personNames: string[],
+  language: string = "en"
+): Promise<{ answer: string; sources: GlobalChatSource[] }> {
+  const isHebrew = language === "he";
+  const personList = personNames.join(", ");
+
+  // Group context by session
+  const bySession = new Map<string, {
+    title: string;
+    date?: string;
+    chunks: GlobalRetrievedContext[];
+  }>();
+
+  for (const chunk of retrievedContext) {
+    if (!bySession.has(chunk.sessionId)) {
+      bySession.set(chunk.sessionId, {
+        title: chunk.sessionTitle,
+        date: chunk.sessionDate,
+        chunks: [],
+      });
+    }
+    bySession.get(chunk.sessionId)!.chunks.push(chunk);
+  }
+
+  // Build context with session attribution
+  const contextParts: string[] = [];
+  const sources: GlobalChatSource[] = [];
+
+  for (const [sessionId, data] of bySession) {
+    const sessionLabel = data.date
+      ? `${data.title} (${data.date})`
+      : data.title;
+
+    const transcriptChunks = data.chunks.filter(c => c.sourceType === "transcript");
+    const attachmentChunks = data.chunks.filter(c => c.sourceType === "attachment");
+
+    const excerpts: string[] = [];
+
+    if (transcriptChunks.length > 0) {
+      const content = transcriptChunks
+        .map(c => {
+          const speaker = c.speakerName ? `${c.speakerName}: ` : "";
+          return `${speaker}${c.content}`;
+        })
+        .join("\n");
+      contextParts.push(isHebrew
+        ? `מפגישה "${sessionLabel}":\n${content}`
+        : `From meeting "${sessionLabel}":\n${content}`);
+      excerpts.push(...transcriptChunks.map(c => c.content.substring(0, 100) + "..."));
+    }
+
+    if (attachmentChunks.length > 0) {
+      for (const chunk of attachmentChunks) {
+        const fileName = chunk.sourceName || "document";
+        contextParts.push(isHebrew
+          ? `מקובץ "${fileName}" בפגישה "${sessionLabel}":\n${chunk.content}`
+          : `From file "${fileName}" in meeting "${sessionLabel}":\n${chunk.content}`);
+        excerpts.push(chunk.content.substring(0, 100) + "...");
+      }
+    }
+
+    sources.push({
+      sessionId,
+      sessionTitle: data.title,
+      sessionDate: data.date,
+      excerpts,
+    });
+  }
+
+  if (contextParts.length === 0) {
+    return {
+      answer: isHebrew
+        ? `לא מצאתי מידע רלוונטי בפגישות עם ${personList}.`
+        : `I couldn't find relevant information in meetings with ${personList}.`,
+      sources: [],
+    };
+  }
+
+  const finalContext = contextParts.join("\n\n---\n\n");
+
+  // GUARDRAILED SYSTEM PROMPT: Strict person-based query constraints
+  const systemPrompt = isHebrew
+    ? `אתה עוזר מועיל עם זיכרון של הפגישות של המשתמש עם ${personList}.
+
+קריטי - כללים שאסור לעבור עליהם:
+1. אתה רשאי להשתמש רק במידע מהפגישות שסופקו בהקשר
+2. אל תניח שאדם השתתף בפגישה בגלל דמיון נושאי
+3. אם המידע לא מופיע בפגישות שסופקו, אמור זאת בבירור
+4. ציין מאיזו פגישה מגיע כל מידע
+5. אם יש מסמכים מצורפים, ציין גם את שם הקובץ
+6. השב בעברית`
+    : `You are a helpful assistant with memory of the user's meetings with ${personList}.
+
+CRITICAL RULES - You must follow these:
+1. You may ONLY use information from the meetings provided in the context
+2. Do NOT assume a person participated in a meeting based on topic similarity
+3. If the information is not in the provided meetings, say so clearly
+4. Cite which meeting each piece of information comes from
+5. If information comes from an attached document, also mention the file name`;
+
+  const response = await getOpenAI().chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `${isHebrew ? "פגישות עם" : "Meetings with"} ${personList}:\n\n${finalContext}\n\n${isHebrew ? "שאלה" : "Question"}: ${question}` },
+    ],
+    temperature: 0.3,
+    max_tokens: 800,
+  });
+
+  const answer = response.choices[0]?.message?.content || (isHebrew
+    ? "לא ניתן לענות על השאלה."
+    : "Unable to answer the question.");
+
+  return { answer, sources };
+}
+
+/**
  * Simple question answering without RAG (fallback)
  */
 export async function answerQuestion(

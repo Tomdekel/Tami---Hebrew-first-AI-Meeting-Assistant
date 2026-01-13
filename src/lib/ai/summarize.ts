@@ -64,42 +64,54 @@ export async function generateSummary(
 
   const isHebrew = language === "he";
 
-  // Single English prompt that outputs in the appropriate language
-  const systemPrompt = `You are a meeting summarization expert. Analyze meeting transcripts and provide comprehensive summaries.
+  // Enhanced prompt for Fireflies-quality summaries
+  const systemPrompt = `You are an expert meeting analyst creating COMPREHENSIVE, DETAILED meeting summaries.
 
-Your task is to create:
+## CRITICAL: Speaker Identification
+NEVER use "Speaker 1" or "Speaker 2" in your output. Instead:
+- Listen for self-introductions: "אני דניאל" → use "דניאל"
+- Listen for names being used: "תום, מה אתה חושב?" → that speaker is "תום"
+- Identify roles from context: interviewer, candidate, CEO, manager, data analyst
+- Use descriptive roles in Hebrew: "המראיין", "המועמד", "המנכ״ל", "האנליסט"
+- Only as absolute last resort: "משתתף א׳", "משתתף ב׳"
 
-1. **Overview**: A comprehensive paragraph (4-6 sentences) summarizing the main topics, participants, key outcomes, and overall purpose of the meeting. This should give someone who didn't attend a complete picture.
+## Overview Requirements (DETAILED - 5-7 sentences)
+Write a **comprehensive paragraph** that:
+- Opens by naming the meeting type and participants BY NAME
+- Covers ALL major topics discussed chronologically
+- Mentions specific numbers, percentages, and metrics discussed
+- Summarizes key findings, conclusions, and next steps
+- Reads like a professional meeting brief for executives
 
-2. **Notes**: Divide the meeting into 4-8 major topic sections. Each section needs:
-   - A descriptive title (in the transcript's language)
-   - An appropriate emoji from this list:
-     🤝 Introductions/personal updates
-     📈 Business achievements/results
-     🏗️ Roles/team structure
-     🤖 AI/technology discussions
-     💼 Business opportunities
-     💰 Compensation/salary terms
-     🎯 Goals/strategy
-     📋 Projects/deliverables
-     💡 Ideas/brainstorming
-     ❓ Q&A/discussions
-   - Time range (start - end) based on transcript timestamps
-   - 2-4 bullet points summarizing key information in that section
+Example quality: "בפגישת ניתוח נתונים בנושא 'ניתוח גוסטינג', נבחנה תופעת הגוסטינג... נמצא כי 33% מהמשתמשים שחוו גוסטינג קנו לאחר מכן..."
 
-3. **Action Items**: Tasks that need to be done, grouped by assignee. Include:
-   - Clear task description
-   - Who is responsible
-   - When it was mentioned (timestamp)
-   - Deadline if specified
+## Notes Requirements (MANDATORY - Create 3-6 sections)
+You MUST create timestamped sections covering the ENTIRE meeting. This is NOT optional.
+Each section MUST have:
+- **title**: Descriptive Hebrew title (e.g., "ניתוח גוסטינג", "מסקנות והמלצות")
+- **emoji**: One emoji: 🔍 📊 🧐 📈 💡 🎯 📋 ❓ 🤖 💼 🏗️
+- **startTime**: Exact timestamp when topic starts (from transcript)
+- **endTime**: Exact timestamp when topic ends
+- **bullets**: 4-6 SPECIFIC bullet points with actual numbers, percentages, names, findings - NOT generic statements
 
-4. **Decisions**: Conclusions or agreements reached during the meeting.
+## Action Items
+- Use REAL NAMES for assignees - NEVER "Speaker 1"
+- If no clear assignee, use "Unassigned"
+- Include timestamp when mentioned (HH:MM:SS)
+- Include deadline if specified in conversation
 
-5. **Key Points**: 3-5 most important takeaways (for backwards compatibility).
+## Decisions
+- Extract concrete decisions and conclusions
+- Include specific numbers and findings
 
-6. **Topics**: Main subjects discussed (for tagging).
+## Key Points
+- 3-5 most important takeaways with specifics
 
-IMPORTANT: Output all text content in ${isHebrew ? "Hebrew" : "English"} (matching the transcript language).`;
+## Topics
+- Main subjects for tagging
+
+## Language
+Output ALL content in ${isHebrew ? "Hebrew" : "the transcript's language"}.`;
 
   const userPrompt = context
     ? `Meeting Context: ${context}\n\nTranscript:\n${formattedTranscript}`
@@ -120,7 +132,7 @@ IMPORTANT: Output all text content in ${isHebrew ? "Hebrew" : "English"} (matchi
           properties: {
             overview: {
               type: "string",
-              description: "A comprehensive 4-6 sentence overview of the meeting covering main topics, participants, and outcomes",
+              description: "COMPREHENSIVE 5-7 sentence overview with participant names, specific numbers/percentages, key findings and conclusions",
             },
             notes: {
               type: "array",
@@ -129,29 +141,29 @@ IMPORTANT: Output all text content in ${isHebrew ? "Hebrew" : "English"} (matchi
                 properties: {
                   title: {
                     type: "string",
-                    description: "Descriptive section title",
+                    description: "Descriptive Hebrew section title (e.g., 'ניתוח גוסטינג', 'מסקנות והמלצות')",
                   },
                   emoji: {
                     type: "string",
-                    description: "Single emoji representing the section topic",
+                    description: "Single emoji: 🔍 📊 🧐 📈 💡 🎯 📋 ❓",
                   },
                   startTime: {
                     type: "string",
-                    description: "Start time in MM:SS or HH:MM:SS format",
+                    description: "REQUIRED: Exact start timestamp from transcript (HH:MM:SS or MM:SS)",
                   },
                   endTime: {
                     type: "string",
-                    description: "End time in MM:SS or HH:MM:SS format",
+                    description: "REQUIRED: Exact end timestamp from transcript (HH:MM:SS or MM:SS)",
                   },
                   bullets: {
                     type: "array",
                     items: { type: "string" },
-                    description: "2-4 key points from this section",
+                    description: "4-6 SPECIFIC bullet points with actual numbers, percentages, names - NOT generic",
                   },
                 },
                 required: ["title", "emoji", "startTime", "endTime", "bullets"],
               },
-              description: "4-8 timestamped sections covering major topics",
+              description: "MANDATORY: 3-6 timestamped sections covering the ENTIRE meeting",
             },
             keyPoints: {
               type: "array",
@@ -184,27 +196,27 @@ IMPORTANT: Output all text content in ${isHebrew ? "Hebrew" : "English"} (matchi
                 properties: {
                   description: {
                     type: "string",
-                    description: "What needs to be done",
+                    description: "Clear, specific task description",
                   },
                   assignee: {
                     type: "string",
                     nullable: true,
-                    description: "Who is responsible for this task",
+                    description: "REAL NAME or 'Unassigned'. NEVER use 'Speaker 1' or 'Speaker 2'",
                   },
                   deadline: {
                     type: "string",
                     nullable: true,
-                    description: "When it's due (null if not specified)",
+                    description: "Deadline if mentioned",
                   },
                   timestamp: {
                     type: "string",
                     nullable: true,
-                    description: "When this action item was mentioned in the meeting (MM:SS format)",
+                    description: "REQUIRED: When mentioned in meeting (HH:MM:SS format)",
                   },
                 },
                 required: ["description"],
               },
-              description: "Tasks to be done, with assignee and optional deadline",
+              description: "Tasks with REAL NAME assignees (or 'Unassigned') and timestamps",
             },
             topics: {
               type: "array",
@@ -217,7 +229,7 @@ IMPORTANT: Output all text content in ${isHebrew ? "Hebrew" : "English"} (matchi
       },
     ],
     function_call: { name: "save_summary" },
-    temperature: 0.3,
+    temperature: 0.4, // Slightly higher for more detailed output
   });
 
   const functionCall = response.choices[0]?.message?.function_call;

@@ -161,7 +161,43 @@ function MeetingDetailPageV2Content({ params }: PageProps) {
   const { data: actionItems = [], isLoading: actionItemsLoading } = useActionItemsQuery(currentMeetingId)
 
   // Cache invalidation helpers
-  const { invalidateSession, removeSessionFromList } = useInvalidateSessions()
+  const { invalidateSession, invalidateSessionsList, removeSessionFromList } = useInvalidateSessions()
+
+  // Poll for transcription status when processing
+  useEffect(() => {
+    // Only poll if session is in processing state
+    if (!session || session.status !== "processing") {
+      return
+    }
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`/api/sessions/${currentMeetingId}/transcription-status`)
+        if (!response.ok) return
+
+        const data = await response.json()
+
+        // If transcription completed or failed, refresh data
+        if (data.status === "completed" || data.status === "failed" || data.status === "expired") {
+          console.log("[polling] Transcription status changed:", data.status)
+          // Refetch session to get updated data
+          await refetch()
+          // Also refresh the sidebar list
+          invalidateSessionsList()
+        }
+      } catch (err) {
+        console.error("[polling] Failed to check transcription status:", err)
+      }
+    }
+
+    // Poll every 3 seconds
+    const interval = setInterval(pollStatus, 3000)
+
+    // Initial poll
+    pollStatus()
+
+    return () => clearInterval(interval)
+  }, [session?.status, currentMeetingId, refetch, invalidateSessionsList])
 
   // UI states
   const [isDeleting, setIsDeleting] = useState(false)
