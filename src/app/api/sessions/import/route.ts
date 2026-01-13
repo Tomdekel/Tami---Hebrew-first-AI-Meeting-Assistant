@@ -77,10 +77,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Read file content
-    const buffer = Buffer.from(await file.arrayBuffer());
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(await file.arrayBuffer());
+      console.log("[import] File read successfully:", { size: buffer.length, filename: file.name });
+    } catch (readError) {
+      console.error("[import] Failed to read file:", readError);
+      return internalError(`Failed to read file: ${readError instanceof Error ? readError.message : 'Unknown error'}`);
+    }
 
     // Parse the transcript
-    const parsed = await parseTranscript(buffer, file.name, {}, file.type);
+    let parsed: Awaited<ReturnType<typeof parseTranscript>>;
+    try {
+      parsed = await parseTranscript(buffer, file.name, {}, file.type);
+      console.log("[import] Transcript parsed:", {
+        segments: parsed.segments.length,
+        speakers: parsed.speakerNames.length,
+        confidence: parsed.confidence,
+        format: parsed.format,
+      });
+    } catch (parseError) {
+      console.error("[import] Failed to parse transcript:", parseError);
+      return internalError(`Failed to parse transcript: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
 
     // Determine source type
     const sourceType = determineSourceType(parsed);
@@ -190,13 +209,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     // Detailed error logging for debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
     console.error("[import] Import failed:", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
+      error: errorMessage,
+      stack: errorStack,
     });
-    return internalError(
-      error instanceof Error ? error.message : "Failed to import transcript"
-    );
+
+    // Always return detailed error message for import failures
+    // This helps users understand what went wrong
+    return internalError(errorMessage || "Failed to import transcript", {
+      timestamp: new Date().toISOString(),
+    });
   }
 }
 
