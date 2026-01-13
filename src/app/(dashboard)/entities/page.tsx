@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
@@ -11,7 +11,6 @@ import {
   User,
   Building2,
   FolderKanban,
-  Hash,
   MapPin,
   Calendar,
   Package,
@@ -267,217 +266,6 @@ const additionalEntityTypeOptions = [
   },
 ];
 
-const mockEntities: Entity[] = [
-  {
-    id: "mock-person-1",
-    typeId: "person",
-    name: "דני כהן",
-    description: "CTO • Acme Technologies",
-    mentionCount: 34,
-    meetingCount: 6,
-    lastMeeting: "2024-01-09",
-    meetings: [{ id: "m-1", title: "סיכום רבעון Q4", date: "2024-01-09" }],
-    confidence: 0.93,
-  },
-  {
-    id: "mock-person-dup-1",
-    typeId: "person",
-    name: "דני כהן",
-    description: "Chief Technology Officer • Acme",
-    mentionCount: 8,
-    meetingCount: 2,
-    lastMeeting: "2024-01-05",
-    meetings: [{ id: "m-2", title: "תכנון ספרינט 12", date: "2024-01-05" }],
-    confidence: 0.79,
-  },
-  {
-    id: "mock-person-2",
-    typeId: "person",
-    name: "מאיה לוי",
-    description: "Product Lead • BrightAI",
-    mentionCount: 21,
-    meetingCount: 4,
-    lastMeeting: "2024-01-08",
-    meetings: [{ id: "m-3", title: "תכנון מוצר Q1", date: "2024-01-08" }],
-    confidence: 0.9,
-  },
-  {
-    id: "mock-org-1",
-    typeId: "organization",
-    name: "Acme Technologies",
-    description: "Enterprise SaaS • Partner",
-    mentionCount: 18,
-    meetingCount: 5,
-    lastMeeting: "2024-01-09",
-    meetings: [{ id: "m-1", title: "סיכום רבעון Q4", date: "2024-01-09" }],
-    confidence: 0.88,
-  },
-  {
-    id: "mock-org-dup-1",
-    typeId: "organization",
-    name: "ACME Tech",
-    description: "Alias for Acme",
-    mentionCount: 7,
-    meetingCount: 2,
-    lastMeeting: "2024-01-03",
-    meetings: [{ id: "m-4", title: "ישיבת מכירות", date: "2024-01-03" }],
-    confidence: 0.72,
-  },
-  {
-    id: "mock-project-1",
-    typeId: "project",
-    name: "Atlas",
-    description: "Migration to Neo4j Aura",
-    mentionCount: 12,
-    meetingCount: 3,
-    lastMeeting: "2024-01-07",
-    meetings: [{ id: "m-5", title: "סטטוס תשתיות", date: "2024-01-07" }],
-    confidence: 0.86,
-  },
-  {
-    id: "mock-topic-1",
-    typeId: "topic",
-    name: "Onboarding",
-    description: "תהליך קליטת עובדים",
-    mentionCount: 9,
-    meetingCount: 3,
-    lastMeeting: "2024-01-06",
-    meetings: [{ id: "m-6", title: "קליטת עובדים חדשים", date: "2024-01-06" }],
-    confidence: 0.82,
-  },
-  {
-    id: "mock-tech-1",
-    typeId: "technology",
-    name: "Neo4j AuraDB",
-    description: "Graph database",
-    mentionCount: 14,
-    meetingCount: 4,
-    lastMeeting: "2024-01-07",
-    meetings: [{ id: "m-5", title: "סטטוס תשתיות", date: "2024-01-07" }],
-    confidence: 0.91,
-  },
-  {
-    id: "mock-product-1",
-    typeId: "product",
-    name: "Tami v2",
-    description: "Hebrew-first memory engine",
-    mentionCount: 22,
-    meetingCount: 6,
-    lastMeeting: "2024-01-09",
-    meetings: [{ id: "m-1", title: "סיכום רבעון Q4", date: "2024-01-09" }],
-    confidence: 0.95,
-  },
-  {
-    id: "mock-location-1",
-    typeId: "location",
-    name: "תל אביב",
-    description: "HQ",
-    mentionCount: 6,
-    meetingCount: 2,
-    lastMeeting: "2024-01-04",
-    meetings: [{ id: "m-7", title: "פגישת הנהלה", date: "2024-01-04" }],
-    confidence: 0.78,
-  },
-  {
-    id: "mock-date-1",
-    typeId: "date",
-    name: "Q1 2025",
-    description: "Target launch window",
-    mentionCount: 4,
-    meetingCount: 1,
-    lastMeeting: "2024-01-02",
-    meetings: [{ id: "m-8", title: "מפת דרכים", date: "2024-01-02" }],
-    confidence: 0.7,
-  },
-  {
-    id: "mock-other-1",
-    typeId: "other",
-    name: "SOC2",
-    description: "Compliance milestone",
-    mentionCount: 5,
-    meetingCount: 2,
-    lastMeeting: "2024-01-03",
-    meetings: [{ id: "m-4", title: "ישיבת מכירות", date: "2024-01-03" }],
-    confidence: 0.76,
-  },
-];
-
-const mockRelationships: Relationship[] = [
-  {
-    id: "rel-1",
-    sourceId: "mock-person-1",
-    targetId: "mock-org-1",
-    type: "WORKS_AT",
-    label: "עובד ב",
-  },
-  {
-    id: "rel-2",
-    sourceId: "mock-person-2",
-    targetId: "mock-project-1",
-    type: "LEADS",
-    label: "מובילה",
-  },
-  {
-    id: "rel-3",
-    sourceId: "mock-project-1",
-    targetId: "mock-tech-1",
-    type: "USES",
-    label: "משתמש ב",
-  },
-  {
-    id: "rel-4",
-    sourceId: "mock-product-1",
-    targetId: "mock-org-1",
-    type: "BUILT_BY",
-    label: "פותח על ידי",
-  },
-  {
-    id: "rel-5",
-    sourceId: "mock-org-1",
-    targetId: "mock-location-1",
-    type: "LOCATED_IN",
-    label: "ממוקם ב",
-  },
-];
-
-const mockGraphNodes: GraphNode[] = mockEntities.map((entity) => ({
-  id: entity.id,
-  label: entity.name,
-  type: entity.typeId,
-  mention_count: entity.mentionCount,
-}));
-
-const mockGraphEdges: GraphEdge[] = mockRelationships.map((rel) => ({
-  source: rel.sourceId,
-  target: rel.targetId,
-  type: rel.type,
-}));
-
-const mockSuggestions = [
-  {
-    id: "s-1",
-    source_value: "Acme Technologies",
-    target_value: "ACME Tech",
-    source_type: "organization",
-    target_type: "organization",
-    relationship_type: "ALIAS_OF",
-    confidence: 0.82,
-    context: "הוזכרו כפלטפורמה אחת במספר פגישות",
-    sessions: { title: "סיכום רבעון Q4" },
-  },
-  {
-    id: "s-2",
-    source_value: "דני כהן",
-    target_value: "דני כהן",
-    source_type: "person",
-    target_type: "person",
-    relationship_type: "POSSIBLE_DUPLICATE",
-    confidence: 0.76,
-    context: "וריאציה בשם ותפקיד זהה",
-    sessions: { title: "תכנון ספרינט 12" },
-  },
-];
-
 function getInitials(name: string): string {
   return name
     .split(" ")
@@ -490,16 +278,6 @@ export default function EntitiesPage() {
   const t = useTranslations();
   const locale = useLocale();
   const isRTL = locale === "he";
-
-  // Helper function to format dates based on locale
-  const formatDateLocalized = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString(isRTL ? "he-IL" : "en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  };
 
   // Helper function to get localized entity type name
   const getTypeName = (type: EntityType): string => {
@@ -550,81 +328,91 @@ export default function EntitiesPage() {
   const [newEntity, setNewEntity] = useState({ name: "", description: "" });
   const [newRelationship, setNewRelationship] = useState({ targetId: "", type: "RELATED_TO", label: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const mockSeededRef = useRef(false);
   const [deleteCandidate, setDeleteCandidate] = useState<Entity | null>(null);
 
-  const seedMockData = useCallback(() => {
-    setEntities(mockEntities);
-    setRelationships(mockRelationships);
-    setGraphNodes(mockGraphNodes);
-    setGraphEdges(mockGraphEdges);
-    const filteredMockSuggestions = mockSuggestions.filter(
-      (s) => s.confidence >= suggestionMin && s.confidence <= suggestionMax
-    );
-    setSuggestions((prev) => (prev.length > 0 ? prev : filteredMockSuggestions));
-
-    const typeCounts = mockEntities.reduce<Record<string, number>>((acc, entity) => {
-      acc[entity.typeId] = (acc[entity.typeId] || 0) + 1;
-      return acc;
-    }, {});
-
-    setEntityTypes((prev) =>
-      prev.map((type) => ({
-        ...type,
-        count: typeCounts[type.id] || 0,
-      }))
-    );
-  }, [suggestionMax, suggestionMin]);
-
-  // Load entities from Neo4j
+  // Load entities from API
   const loadEntities = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch("/api/graph/entities");
-      if (!response.ok) {
-        throw new Error("Failed to load entities");
-      }
-      const data = await response.json();
 
-      // Transform grouped entities to flat array
-      const flatEntities: Entity[] = [];
-      const typeCounts: Record<string, number> = {};
+      // Fetch people from the people API (real data from Supabase)
+      const peopleResponse = await fetch("/api/people");
+      const peopleData = peopleResponse.ok ? await peopleResponse.json() : { people: [] };
 
-      for (const [type, typeEntities] of Object.entries(data.entities || {})) {
-        typeCounts[type] = (typeEntities as unknown[]).length;
-        for (const e of typeEntities as Record<string, unknown>[]) {
-          flatEntities.push({
-            id: e.id as string,
-            typeId: type,
-            name: (e.display_value as string) || (e.normalized_value as string) || "",
-            display_value: e.display_value as string,
-            normalized_value: e.normalized_value as string,
-            mentionCount: (e.mention_count as number) || 0,
-            meetingCount: (e.meetingCount as number) || 0,
-            confidence: e.confidence as number,
-            aliases: e.aliases as string[],
-            description: e.description as string,
-          });
+      // Also try to fetch graph entities (Neo4j) for other entity types
+      const graphEntities: Entity[] = [];
+      try {
+        const graphResponse = await fetch("/api/graph/entities");
+        if (graphResponse.ok) {
+          const graphData = await graphResponse.json();
+
+          // Transform grouped entities to flat array (excluding person type, we use people API for that)
+          for (const [type, typeEntities] of Object.entries(graphData.entities || {})) {
+            if (type === "person") continue; // Skip persons from graph, use people API instead
+            for (const e of typeEntities as Record<string, unknown>[]) {
+              graphEntities.push({
+                id: e.id as string,
+                typeId: type,
+                name: (e.display_value as string) || (e.normalized_value as string) || "",
+                display_value: e.display_value as string,
+                normalized_value: e.normalized_value as string,
+                mentionCount: (e.mention_count as number) || 0,
+                meetingCount: (e.meetingCount as number) || 0,
+                confidence: e.confidence as number,
+                aliases: e.aliases as string[],
+                description: e.description as string,
+              });
+            }
+          }
         }
+      } catch {
+        console.log("Graph entities not available, using people API only");
       }
 
-      setEntities(flatEntities);
+      // Transform people data to Entity format
+      const peopleEntities: Entity[] = (peopleData.people || []).map((person: {
+        id: string;
+        display_name: string;
+        normalized_key: string;
+        aliases?: string[];
+        created_at?: string;
+      }) => ({
+        id: person.id,
+        typeId: "person",
+        name: person.display_name,
+        display_value: person.display_name,
+        normalized_value: person.normalized_key,
+        mentionCount: 0,
+        meetingCount: 0,
+        aliases: person.aliases || [],
+        description: "",
+      }));
+
+      // Combine people and graph entities
+      const allEntities = [...peopleEntities, ...graphEntities];
+      setEntities(allEntities);
 
       // Update type counts
+      const typeCounts: Record<string, number> = {};
+      for (const entity of allEntities) {
+        typeCounts[entity.typeId] = (typeCounts[entity.typeId] || 0) + 1;
+      }
+
       setEntityTypes((prev) =>
         prev.map((type) => ({
           ...type,
           count: typeCounts[type.id] || 0,
         }))
       );
+
+      setError(null);
     } catch (err) {
       console.error("Failed to load entities:", err);
-      setError(null);
-      seedMockData();
+      setError("Failed to load entities");
     } finally {
       setIsLoading(false);
     }
-  }, [seedMockData]);
+  }, []);
 
   // Load graph visualization data
   const loadGraphData = useCallback(async () => {
@@ -705,13 +493,7 @@ export default function EntitiesPage() {
     loadSuggestions();
   }, [loadEntities, loadGraphData, loadSuggestions]);
 
-  useEffect(() => {
-    if (mockSeededRef.current) return;
-    if (!isLoading && !error && entities.length === 0) {
-      seedMockData();
-      mockSeededRef.current = true;
-    }
-  }, [entities.length, error, isLoading, seedMockData]);
+  // Mock data fallback removed - we now use real data from /api/people
 
   // Auto-refresh when tab is visible (every 30 seconds)
   useEffect(() => {
