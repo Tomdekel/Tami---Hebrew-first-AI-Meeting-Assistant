@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import {
-  processDocumentWithEmbeddings,
-  isSupportedDocumentType,
-} from "@/lib/ai/document-processor";
+
+// Dynamic imports for document processing - loaded only when needed
+// This prevents module load errors from crashing the GET handler
+async function getDocumentProcessor() {
+  const mod = await import("@/lib/ai/document-processor");
+  return {
+    processDocumentWithEmbeddings: mod.processDocumentWithEmbeddings,
+    isSupportedDocumentType: mod.isSupportedDocumentType,
+  };
+}
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -201,8 +207,9 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     // Process document and create embeddings if supported
     let embeddingsCreated = 0;
-    if (isSupportedDocumentType(file.type, file.name)) {
-      try {
+    try {
+      const { isSupportedDocumentType, processDocumentWithEmbeddings } = await getDocumentProcessor();
+      if (isSupportedDocumentType(file.type, file.name)) {
         const buffer = Buffer.from(await file.arrayBuffer());
         const { embeddings, metadata } = await processDocumentWithEmbeddings(
           buffer,
@@ -240,10 +247,10 @@ export async function POST(request: Request, { params }: RouteParams) {
         console.log(
           `Processed ${file.name}: ${metadata.wordCount} words, ${embeddingsCreated} chunks embedded`
         );
-      } catch (procError) {
-        // Log but don't fail the upload if processing fails
-        console.error("Document processing error:", procError);
       }
+    } catch (procError) {
+      // Log but don't fail the upload if document processing fails
+      console.error("Document processing error:", procError);
     }
 
     return NextResponse.json({
