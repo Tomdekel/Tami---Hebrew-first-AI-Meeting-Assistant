@@ -12,6 +12,20 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  const pathname = request.nextUrl.pathname;
+
+  // Skip full auth check for RSC (React Server Component) requests
+  // These are client-side navigations that already have a valid session
+  const isRSCRequest = request.headers.get("RSC") === "1";
+  const hasAuthCookie = request.cookies.has("sb-access-token") ||
+    request.cookies.getAll().some(c => c.name.includes("auth-token"));
+
+  // For RSC requests with existing auth cookies, skip the expensive getUser() call
+  // The page components will validate the session if needed
+  if (isRSCRequest && hasAuthCookie) {
+    return supabaseResponse;
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -39,8 +53,6 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
 
   // Check if trying to access protected route without auth
   const isProtectedRoute = protectedRoutes.some(
