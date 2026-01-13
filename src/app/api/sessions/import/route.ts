@@ -190,11 +190,13 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", session.id);
 
-    // Run AI enhancements in the background (non-blocking)
-    // These can fail without breaking the import flow
-    runAIEnhancements(supabase, session.id, transcript.id, user.id, parsed, detectedLanguage).catch(
-      (error) => console.error("[import] AI enhancements failed:", error)
-    );
+    // Run AI enhancements (must await on serverless to complete before function terminates)
+    try {
+      await runAIEnhancements(supabase, session.id, transcript.id, user.id, parsed, detectedLanguage);
+    } catch (aiError) {
+      // Log but don't fail the import - user can still see transcript
+      console.error("[import] AI enhancements failed:", aiError);
+    }
 
     const response: ImportTranscriptResponse = {
       success: true,
