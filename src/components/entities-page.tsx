@@ -308,30 +308,48 @@ function GraphView({
     setNodes(initialNodes)
   }, [filteredEntities, entityTypes, canvasSize])
 
-  // Force simulation
+  // Force simulation with alpha decay (simulation cools down and stops)
+  const alphaRef = useRef(1) // Simulation energy - decays over time
+  const alphaDecay = 0.02 // How fast simulation cools (higher = faster stop)
+  const alphaMin = 0.001 // When to stop simulation completely
+
+  useEffect(() => {
+    // Reset alpha when nodes change (restart simulation)
+    alphaRef.current = 1
+  }, [filteredEntities])
+
   useEffect(() => {
     const simulate = () => {
+      // If simulation has cooled down, stop animating
+      if (alphaRef.current < alphaMin) {
+        return
+      }
+
+      // Decay alpha each frame (simulation cools down)
+      alphaRef.current *= (1 - alphaDecay)
+
       setNodes((prevNodes) => {
         const newNodes = prevNodes.map((node) => ({ ...node }))
+        const alpha = alphaRef.current // Current simulation energy
 
-        // Apply forces
+        // Apply forces (scaled by alpha so they weaken as simulation cools)
         for (let i = 0; i < newNodes.length; i++) {
           const node = newNodes[i]
 
-          // Repulsion from other nodes (reduced for stability)
+          // Repulsion from other nodes (reduced and scaled by alpha)
           for (let j = 0; j < newNodes.length; j++) {
             if (i === j) continue
             const other = newNodes[j]
             const dx = node.x - other.x
             const dy = node.y - other.y
             const dist = Math.sqrt(dx * dx + dy * dy) || 1
-            // Reduced from 2000 to 1200 for less chaotic movement
-            const force = 1200 / (dist * dist)
+            // Much lower repulsion (500) scaled by alpha
+            const force = (500 / (dist * dist)) * alpha
             node.vx += (dx / dist) * force
             node.vy += (dy / dist) * force
           }
 
-          // Attraction along edges
+          // Attraction along edges (scaled by alpha)
           const nodeRelationships = relationships.filter((r) => r.sourceId === node.id || r.targetId === node.id)
           for (const rel of nodeRelationships) {
             const otherId = rel.sourceId === node.id ? rel.targetId : rel.sourceId
@@ -340,33 +358,33 @@ function GraphView({
               const dx = other.x - node.x
               const dy = other.y - node.y
               const dist = Math.sqrt(dx * dx + dy * dy) || 1
-              const force = dist * 0.01
+              const force = dist * 0.008 * alpha
               node.vx += (dx / dist) * force
               node.vy += (dy / dist) * force
             }
           }
 
-          // Center gravity (use dynamic canvas center)
+          // Center gravity (scaled by alpha)
           const centerX = canvasSize.width / 2
           const centerY = canvasSize.height / 2
-          node.vx += (centerX - node.x) * 0.001
-          node.vy += (centerY - node.y) * 0.001
+          node.vx += (centerX - node.x) * 0.0005 * alpha
+          node.vy += (centerY - node.y) * 0.0005 * alpha
 
-          // Damping (higher = more friction, slower movement)
-          node.vx *= 0.85
-          node.vy *= 0.85
+          // Strong damping (0.7 = lose 30% velocity per frame)
+          node.vx *= 0.7
+          node.vy *= 0.7
 
-          // Velocity capping to prevent chaotic movement
-          const maxVelocity = 8
+          // Low velocity cap
+          const maxVelocity = 3
           const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy)
           if (speed > maxVelocity) {
             node.vx = (node.vx / speed) * maxVelocity
             node.vy = (node.vy / speed) * maxVelocity
           }
 
-          // Stop very slow nodes completely (reduces jitter)
-          if (Math.abs(node.vx) < 0.1) node.vx = 0
-          if (Math.abs(node.vy) < 0.1) node.vy = 0
+          // Stop slow nodes (higher threshold)
+          if (Math.abs(node.vx) < 0.3) node.vx = 0
+          if (Math.abs(node.vy) < 0.3) node.vy = 0
 
           // Apply velocity
           if (!dragNode || dragNode.id !== node.id) {
@@ -378,7 +396,15 @@ function GraphView({
         return newNodes
       })
 
-      animationRef.current = requestAnimationFrame(simulate)
+      // Only continue animation if simulation is still active
+      if (alphaRef.current >= alphaMin) {
+        animationRef.current = requestAnimationFrame(simulate)
+      }
+    }
+
+    // Reheat simulation when dragging (so graph settles after drag)
+    if (dragNode) {
+      alphaRef.current = Math.max(alphaRef.current, 0.3)
     }
 
     animationRef.current = requestAnimationFrame(simulate)
