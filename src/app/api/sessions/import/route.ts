@@ -12,6 +12,7 @@ import { generateEmbeddings, chunkTranscriptForEmbedding } from "@/lib/ai/embedd
 import { extractEntities, EntityType } from "@/lib/ai/entities";
 import { extractRelationships, isValidRelationshipType } from "@/lib/ai/relationships";
 import { runSingleQuery } from "@/lib/neo4j/client";
+import { initializeProcessingSteps, setProcessingStep } from "@/lib/pipelines/meeting-ingestion/processing-state";
 import type { SourceType, IngestionConfidence, ExternalFormat } from "@/lib/types/database";
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -52,6 +53,9 @@ export async function POST(request: NextRequest) {
   if (authError || !user) {
     return unauthorized();
   }
+
+  // Track session ID for cleanup on error
+  let createdSessionId: string | null = null;
 
   try {
     const formData = await request.formData();
@@ -109,6 +113,7 @@ export async function POST(request: NextRequest) {
     const detectedLanguage = hebrewPattern.test(parsed.fullText) ? "he" : "en";
 
     // Create session
+    console.log("[import] Creating session...");
     const { data: session, error: sessionError } = await supabase
       .from("sessions")
       .insert({
@@ -138,7 +143,17 @@ export async function POST(request: NextRequest) {
       return internalError("Failed to create session", { dbError: sessionError?.message });
     }
 
+    // Track session for cleanup on error
+    createdSessionId = session.id;
+    console.log("[import] Session created:", session.id);
+
+    console.log("[import] Initializing processing steps...");
+    await initializeProcessingSteps(supabase, session.id);
+    await setProcessingStep(supabase, session.id, "source_received", "completed");
+    await setProcessingStep(supabase, session.id, "validation_cleanup", "completed");
+
     // Create transcript
+    console.log("[import] Creating transcript...");
     const { data: transcript, error: transcriptError } = await supabase
       .from("transcripts")
       .insert({
@@ -159,6 +174,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create transcript segments
+    console.log("[import] Creating segments:", parsed.segments.length);
     if (parsed.segments.length > 0) {
       const segments = parsed.segments.map((seg, index) => ({
         transcript_id: transcript.id,
@@ -180,24 +196,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update session to completed status before running AI enhancements
-    // This ensures the session is usable even if AI processing fails
+    // Update session to completed status - transcript imports are immediately ready
+    console.log("[import] Updating session status to completed...");
     await supabase
       .from("sessions")
       .update({
         status: "completed",
+        processing_state: "completed",
         participant_count: parsed.speakerNames.length || 1,
       })
       .eq("id", session.id);
 
-    // Run AI enhancements (must await on serverless to complete before function terminates)
-    try {
-      await runAIEnhancements(supabase, session.id, transcript.id, user.id, parsed, detectedLanguage);
-    } catch (aiError) {
-      // Log but don't fail the import - user can still see transcript
-      console.error("[import] AI enhancements failed:", aiError);
-    }
+    // AI enhancements (summary, embeddings, entities) are triggered by the frontend
+    // after import succeeds. This keeps import fast (<3s) and avoids serverless timeouts.
+    // The frontend calls /api/sessions/[id]/summarize, /embeddings, /entities in parallel.
+    console.log("[import] AI enhancements will be triggered by frontend");
 
+    console.log("[import] Import complete, returning response...");
     const response: ImportTranscriptResponse = {
       success: true,
       sessionId: session.id,
@@ -217,7 +232,18 @@ export async function POST(request: NextRequest) {
     console.error("[import] Import failed:", {
       error: errorMessage,
       stack: errorStack,
+      sessionId: createdSessionId,
     });
+
+    // Clean up partially created session to prevent orphaned records
+    if (createdSessionId) {
+      try {
+        await supabase.from("sessions").delete().eq("id", createdSessionId);
+        console.log("[import] Cleaned up orphaned session:", createdSessionId);
+      } catch (cleanupError) {
+        console.error("[import] Failed to clean up session:", cleanupError);
+      }
+    }
 
     // Always return detailed error message for import failures
     // This helps users understand what went wrong
@@ -240,17 +266,22 @@ async function runAIEnhancements(
 
   // Generate summary
   try {
+    await setProcessingStep(supabase, sessionId, "summary_generation", "active");
     await generateAndSaveSummary(supabase, sessionId, userId, {
       language,
       transcriptId,
     });
     console.log(`[import] Summary generated for session ${sessionId}`);
+    await setProcessingStep(supabase, sessionId, "summary_generation", "completed");
+    await setProcessingStep(supabase, sessionId, "action_item_extraction", "active");
+    await setProcessingStep(supabase, sessionId, "action_item_extraction", "completed");
   } catch (summaryError) {
     console.error("[import] Summary generation failed:", summaryError);
   }
 
   // Generate embeddings
   try {
+    await setProcessingStep(supabase, sessionId, "saved_to_memory", "active");
     // Delete any existing embeddings
     await supabase.from("memory_embeddings").delete().eq("session_id", sessionId);
 
@@ -276,18 +307,21 @@ async function runAIEnhancements(
           speakerName: chunk.speakerName,
           startTime: chunk.startTime,
           segmentIndices: chunk.segmentIndices,
+          segmentIds: chunk.segmentIds,
         },
       }));
 
       await supabase.from("memory_embeddings").insert(embeddingRecords);
       console.log(`[import] Embeddings generated: ${chunks.length} chunks for session ${sessionId}`);
     }
+    await setProcessingStep(supabase, sessionId, "saved_to_memory", "completed");
   } catch (embeddingError) {
     console.error("[import] Embedding generation failed:", embeddingError);
   }
 
   // Extract entities
   try {
+    await setProcessingStep(supabase, sessionId, "entity_relationship_extraction", "active");
     const entitySegments = parsed.segments.map((seg) => ({
       speaker: seg.speaker || "Unknown",
       text: seg.text,
@@ -508,6 +542,8 @@ async function runAIEnhancements(
         console.log(`[import] Relationships created: ${relSavedCount} for session ${sessionId}`);
       }
     }
+
+    await setProcessingStep(supabase, sessionId, "entity_relationship_extraction", "completed");
   } catch (entityError) {
     console.error("[import] Entity extraction failed:", entityError);
   }

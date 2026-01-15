@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Codebase Summary
+
+**Tami-2** is a Hebrew-first meeting intelligence platform with AI-powered transcription, summaries, entity extraction, and semantic search.
+
+**Stack**: Next.js 16 + React 19, Supabase (Postgres + Auth), Neo4j (knowledge graph), OpenAI + Ivrit AI
+
+**Key Data Flows**:
+1. **Transcription**: Audio → Whisper (EN) or Ivrit AI (HE) → Segments → Refinement → Summary → Entities → Embeddings
+2. **Q&A**: Question → Query Parser → Keyword/Semantic Search → Evidence → GPT Answer with Citations
+3. **Knowledge Graph**: Entities extracted from transcripts → Neo4j → Duplicate detection → Visualization
+
+**For detailed architecture, see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md).**
+
 ## Build & Development Commands
 
 ```bash

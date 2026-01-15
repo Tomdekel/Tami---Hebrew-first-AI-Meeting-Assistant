@@ -498,5 +498,22 @@
       "noSpeakersDetected": "לא זוהו דוברים",
       "uploadTranscript": "העלה תמלול"
     }
+  },
+  "settings": {
+    "title": "הגדרות",
+    "integrations": {
+      "title": "אינטגרציות לוח שנה",
+      "description": "חבר את לוח השנה שלך לייבוא פגישות ישירות",
+      "google": "Google Calendar",
+      "outlook": "Outlook Calendar",
+      "connect": "התחבר",
+      "disconnect": "נתק",
+      "connected": "מחובר",
+      "notConnected": "לא מחובר",
+      "expired": "החיבור פג תוקף",
+      "connectingTo": "מתחבר ל-{provider}...",
+      "disconnecting": "מנתק...",
+      "lastConnected": "מחובר מ-{date}"
+    }
   }
 }

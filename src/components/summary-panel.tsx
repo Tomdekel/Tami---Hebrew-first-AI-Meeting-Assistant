@@ -11,6 +11,7 @@ import {
   Pencil,
   Save,
   X,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/language-context";
 
 interface ActionItem {
   id: string;
@@ -37,10 +39,19 @@ interface Decision {
   context?: string | null;
 }
 
+interface Note {
+  title: string;
+  emoji: string;
+  startTime: string;
+  endTime: string;
+  bullets: string[];
+}
+
 interface Summary {
   overview: string | null;
   key_points?: string[] | null;
   decisions?: Decision[] | null;
+  notes?: Note[] | null;
   action_items?: ActionItem[] | null;
   edited_at?: string | null;
 }
@@ -54,6 +65,7 @@ interface SummaryPanelProps {
 
 export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = false }: SummaryPanelProps) {
   const t = useTranslations();
+  const { isRTL } = useLanguage();
   const [isOpen, setIsOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   // Edit mode state
@@ -62,18 +74,21 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
   const [editedOverview, setEditedOverview] = useState(summary?.overview || "");
   const [editedKeyPoints, setEditedKeyPoints] = useState<string[]>(summary?.key_points || []);
   const [editedDecisions, setEditedDecisions] = useState<Decision[]>(summary?.decisions || []);
+  const [editedNotes, setEditedNotes] = useState<Note[]>(summary?.notes || []);
 
   // Sync local state when summary prop changes
   useEffect(() => {
     setEditedOverview(summary?.overview || "");
     setEditedKeyPoints(summary?.key_points || []);
     setEditedDecisions(summary?.decisions || []);
+    setEditedNotes(summary?.notes || []);
   }, [summary]);
 
   const handleStartEdit = () => {
     setEditedOverview(summary?.overview || "");
     setEditedKeyPoints(summary?.key_points || []);
     setEditedDecisions(summary?.decisions || []);
+    setEditedNotes(summary?.notes || []);
     setIsEditing(true);
   };
 
@@ -81,6 +96,7 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
     setEditedOverview(summary?.overview || "");
     setEditedKeyPoints(summary?.key_points || []);
     setEditedDecisions(summary?.decisions || []);
+    setEditedNotes(summary?.notes || []);
     setIsEditing(false);
   };
 
@@ -94,6 +110,7 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
           overview: editedOverview,
           key_points: editedKeyPoints,
           decisions: editedDecisions,
+          notes: editedNotes,
         }),
       });
 
@@ -141,6 +158,50 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
     setEditedDecisions(editedDecisions.filter((_, i) => i !== index));
   };
 
+  // Note editing handlers
+  const handleNoteChange = (noteIndex: number, field: keyof Note, value: string | string[]) => {
+    const newNotes = [...editedNotes];
+    newNotes[noteIndex] = { ...newNotes[noteIndex], [field]: value };
+    setEditedNotes(newNotes);
+  };
+
+  const handleNoteBulletChange = (noteIndex: number, bulletIndex: number, value: string) => {
+    const newNotes = [...editedNotes];
+    const newBullets = [...newNotes[noteIndex].bullets];
+    newBullets[bulletIndex] = value;
+    newNotes[noteIndex] = { ...newNotes[noteIndex], bullets: newBullets };
+    setEditedNotes(newNotes);
+  };
+
+  const handleAddNoteBullet = (noteIndex: number) => {
+    const newNotes = [...editedNotes];
+    newNotes[noteIndex] = {
+      ...newNotes[noteIndex],
+      bullets: [...newNotes[noteIndex].bullets, ""],
+    };
+    setEditedNotes(newNotes);
+  };
+
+  const handleRemoveNoteBullet = (noteIndex: number, bulletIndex: number) => {
+    const newNotes = [...editedNotes];
+    newNotes[noteIndex] = {
+      ...newNotes[noteIndex],
+      bullets: newNotes[noteIndex].bullets.filter((_, i) => i !== bulletIndex),
+    };
+    setEditedNotes(newNotes);
+  };
+
+  const handleAddNote = () => {
+    setEditedNotes([
+      ...editedNotes,
+      { title: "", emoji: "📝", startTime: "00:00", endTime: "00:00", bullets: [""] },
+    ]);
+  };
+
+  const handleRemoveNote = (noteIndex: number) => {
+    setEditedNotes(editedNotes.filter((_, i) => i !== noteIndex));
+  };
+
   const handleGenerateSummary = async () => {
     setIsGenerating(true);
     try {
@@ -184,12 +245,13 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
             </CollapsibleTrigger>
             {hasSummary && !isEditing && (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={handleStartEdit}
-                className="h-7 px-2"
+                className="h-7 px-2 text-muted-foreground hover:text-foreground"
               >
-                <Pencil className="h-3.5 w-3.5" />
+                <Pencil className="h-3.5 w-3.5 me-1" />
+                <span className="text-xs">{isRTL ? "עריכה" : "Edit"}</span>
               </Button>
             )}
             {isEditing && (
@@ -258,8 +320,119 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
                   )}
                 </div>
 
-                {/* Key Points */}
-                {(isEditing || (summary.key_points && summary.key_points.length > 0)) && (
+                {/* Notes - Timestamped Sections */}
+                {(isEditing || (summary.notes && summary.notes.length > 0)) && (
+                  <div>
+                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                      {isRTL ? "הערות" : "Notes"}
+                    </h4>
+                    {isEditing ? (
+                      <div className="space-y-4">
+                        {editedNotes.map((note, noteIndex) => (
+                          <div key={noteIndex} className="border rounded-lg p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={note.emoji}
+                                onChange={(e) => handleNoteChange(noteIndex, "emoji", e.target.value)}
+                                className="w-12 h-8 text-center"
+                                maxLength={2}
+                              />
+                              <Input
+                                value={note.title}
+                                onChange={(e) => handleNoteChange(noteIndex, "title", e.target.value)}
+                                placeholder={isRTL ? "כותרת הסעיף" : "Section title"}
+                                className="flex-1 h-8 text-sm"
+                              />
+                              <Input
+                                value={note.startTime}
+                                onChange={(e) => handleNoteChange(noteIndex, "startTime", e.target.value)}
+                                placeholder="00:00"
+                                className="w-16 h-8 text-xs font-mono"
+                              />
+                              <span className="text-muted-foreground">-</span>
+                              <Input
+                                value={note.endTime}
+                                onChange={(e) => handleNoteChange(noteIndex, "endTime", e.target.value)}
+                                placeholder="00:00"
+                                className="w-16 h-8 text-xs font-mono"
+                              />
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemoveNote(noteIndex)}
+                                className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            <div className="space-y-1 ms-4">
+                              {note.bullets.map((bullet, bulletIndex) => (
+                                <div key={bulletIndex} className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">•</span>
+                                  <Input
+                                    value={bullet}
+                                    onChange={(e) => handleNoteBulletChange(noteIndex, bulletIndex, e.target.value)}
+                                    className="flex-1 h-7 text-sm"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveNoteBullet(noteIndex, bulletIndex)}
+                                    className="h-6 px-1 text-muted-foreground hover:text-destructive"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ))}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleAddNoteBullet(noteIndex)}
+                                className="h-6 text-xs text-muted-foreground"
+                              >
+                                <Plus className="h-3 w-3 me-1" />
+                                {isRTL ? "הוסף נקודה" : "Add bullet"}
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAddNote}
+                          className="h-7 text-xs"
+                        >
+                          <Plus className="h-3 w-3 me-1" />
+                          {isRTL ? "הוסף סעיף" : "Add section"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {summary.notes!.map((note, index) => (
+                          <div key={index}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-base">{note.emoji}</span>
+                              <h5 className="font-medium text-sm">{note.title}</h5>
+                              <span className="text-xs text-muted-foreground font-mono">
+                                ({note.startTime} - {note.endTime})
+                              </span>
+                            </div>
+                            <ul className="space-y-0.5 ms-6">
+                              {note.bullets.map((bullet, bIdx) => (
+                                <li key={bIdx} className="text-sm text-muted-foreground">
+                                  • {bullet}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Key Points - Hidden when notes exist (notes are more detailed) */}
+                {(isEditing || (summary.key_points && summary.key_points.length > 0 && (!summary.notes || summary.notes.length === 0))) && (
                   <div>
                     <h4 className="text-xs font-medium text-muted-foreground mb-1">
                       {t("meeting.keyPoints")}
@@ -290,7 +463,7 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
                           onClick={handleAddKeyPoint}
                           className="h-7 text-xs"
                         >
-                          + Add Point
+                          + {isRTL ? "הוסף נקודה" : "Add Point"}
                         </Button>
                       </div>
                     ) : (
@@ -343,7 +516,7 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
                           onClick={handleAddDecision}
                           className="h-7 text-xs"
                         >
-                          + Add Decision
+                          + {isRTL ? "הוסף החלטה" : "Add Decision"}
                         </Button>
                       </div>
                     ) : (
@@ -363,8 +536,7 @@ export function SummaryPanel({ sessionId, summary, onRefresh, isProcessing = fal
                     )}
                   </div>
                 )}
-
-                              </>
+              </>
             ) : (
               <div className="text-center py-4">
                 <p className="text-sm text-muted-foreground mb-3">

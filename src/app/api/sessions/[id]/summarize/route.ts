@@ -22,7 +22,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 
   const body = await request.json();
-  const { overview, key_points, decisions } = body;
+  const { overview, key_points, decisions, notes } = body;
+
+  // Verify the session belongs to the authenticated user
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("id")
+    .eq("id", sessionId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (sessionError || !session) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
 
   // Find the summary for this session
   const { data: summary, error: findError } = await supabase
@@ -40,6 +52,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (overview !== undefined) updateData.overview = overview;
   if (key_points !== undefined) updateData.key_points = key_points;
   if (decisions !== undefined) updateData.decisions = decisions;
+  if (notes !== undefined) updateData.notes = notes;
 
   const { data: updatedSummary, error: updateError } = await supabase
     .from("summaries")
@@ -53,6 +66,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 
   return NextResponse.json({ success: true, summary: updatedSummary });
+}
+
+// Helper function to format seconds as MM:SS timestamp
+function formatTimestamp(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "00:00";
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
 // POST /api/sessions/[id]/summarize - Generate summary for a session
@@ -113,9 +136,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       speaker_id?: string;
     }>;
     const dedupedSegments = dedupeSegmentsByTimeAndText(segmentsWithTimes);
+    // Include timestamps so AI can create properly timestamped notes sections
     const segments = dedupedSegments.map((seg) => ({
       speaker: seg.speaker_name || seg.speaker_id || "Unknown",
       text: seg.text,
+      timestamp: formatTimestamp(seg.start_time),
     }));
 
     // Generate summary
@@ -133,6 +158,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         overview: summaryResult.overview,
         key_points: summaryResult.keyPoints,
         decisions: summaryResult.decisions,
+        notes: summaryResult.notes,
       })
       .select()
       .single();
@@ -204,6 +230,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         overview: summaryResult.overview,
         keyPoints: summaryResult.keyPoints,
         decisions: summaryResult.decisions,
+        notes: summaryResult.notes,
         actionItems: summaryResult.actionItems,
         topics: summaryResult.topics,
       },

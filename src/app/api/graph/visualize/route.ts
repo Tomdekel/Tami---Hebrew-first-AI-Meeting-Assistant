@@ -14,6 +14,8 @@ import { GraphNode, GraphEdge } from "@/lib/neo4j/types";
 
 // Entities appearing in more than this % of sessions are considered noise
 const NOISE_THRESHOLD = 0.4;
+// Minimum sessions needed for noise filtering to be meaningful
+const MIN_SESSIONS_FOR_NOISE_FILTER = 5;
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -84,12 +86,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Step 4: Filter out noisy entities (appear in too many sessions)
+    // Skip noise filtering if user has fewer than MIN_SESSIONS_FOR_NOISE_FILTER sessions
+    const shouldApplyNoiseFilter = totalSessions && totalSessions >= MIN_SESSIONS_FOR_NOISE_FILTER;
+
     const filteredEntities = allEntities.filter(entity => {
-      if (!totalSessions || totalSessions === 0) return true;
+      if (!shouldApplyNoiseFilter) return true;
       const sessionCount = entitySessionCount.get(entity.id)?.size || 0;
-      const ratio = sessionCount / totalSessions;
+      const ratio = sessionCount / totalSessions!;
       return ratio <= NOISE_THRESHOLD;
     }).slice(0, limit); // Apply limit after filtering
+
+    console.log(`[visualize] Total sessions: ${totalSessions}, Noise filter active: ${shouldApplyNoiseFilter}`);
+    console.log(`[visualize] Entities before filter: ${allEntities.length}, after: ${filteredEntities.length}`);
 
     if (filteredEntities.length === 0) {
       return NextResponse.json({ nodes: [], edges: [] });
@@ -161,6 +169,9 @@ export async function GET(request: NextRequest) {
         weight,
       });
     }
+
+    console.log(`[visualize] Sessions with 2+ entities: ${Array.from(sessionToEntities.values()).filter(s => s.size >= 2).length}`);
+    console.log(`[visualize] Edge weights calculated: ${edgeWeights.size}, Final edges: ${edges.length}`);
 
     // Step 7: Try to add explicit Neo4j relationships (if configured)
     if (process.env.NEO4J_URI && process.env.NEO4J_USERNAME && process.env.NEO4J_PASSWORD) {

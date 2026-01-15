@@ -25,6 +25,10 @@ import {
   generateEmbeddingsStep,
   extractRelationshipsStep,
 } from "./steps";
+import {
+  initializeProcessingSteps,
+  setProcessingStep,
+} from "./processing-state";
 import type { PipelineState, PipelineOptions } from "./types";
 
 export * from "./types";
@@ -85,6 +89,10 @@ export async function runMeetingIngestionPipeline(
   };
 
   try {
+    await initializeProcessingSteps(supabase, state.sessionId);
+    await setProcessingStep(supabase, state.sessionId, "source_received", "completed");
+    await setProcessingStep(supabase, state.sessionId, "validation_cleanup", "active");
+
     // Step 1: Transcription (required)
     console.log("[pipeline] Starting transcription...");
     state.status = "transcribing";
@@ -127,17 +135,23 @@ export async function runMeetingIngestionPipeline(
     if (refineResult.success && refineResult.data) {
       stats.refinementApplied = refineResult.data.modifiedCount > 0 || refineResult.data.deletedCount > 0;
     }
+    await setProcessingStep(supabase, state.sessionId, "validation_cleanup", "completed");
 
     // Step 3: Summary Generation (optional)
     console.log("[pipeline] Starting summary generation...");
     state.status = "summarizing";
+    await setProcessingStep(supabase, state.sessionId, "summary_generation", "active");
 
     const summarizeResult = await summarizeStep(state, supabase);
     stats.summaryGenerated = summarizeResult.success;
+    await setProcessingStep(supabase, state.sessionId, "summary_generation", "completed");
+    await setProcessingStep(supabase, state.sessionId, "action_item_extraction", "active");
+    await setProcessingStep(supabase, state.sessionId, "action_item_extraction", "completed");
 
     // Step 4: Entity Extraction (optional)
     console.log("[pipeline] Starting entity extraction...");
     state.status = "extracting_entities";
+    await setProcessingStep(supabase, state.sessionId, "entity_relationship_extraction", "active");
 
     const entitiesResult = await extractEntitiesStep(state, supabase);
     if (entitiesResult.success && entitiesResult.data) {
@@ -147,6 +161,7 @@ export async function runMeetingIngestionPipeline(
     // Step 5: Embedding Generation (optional)
     console.log("[pipeline] Starting embedding generation...");
     state.status = "generating_embeddings";
+    await setProcessingStep(supabase, state.sessionId, "saved_to_memory", "active");
 
     const embeddingsResult = await generateEmbeddingsStep(state, supabase);
     if (embeddingsResult.success && embeddingsResult.data) {
@@ -164,6 +179,9 @@ export async function runMeetingIngestionPipeline(
       }
     }
 
+    await setProcessingStep(supabase, state.sessionId, "entity_relationship_extraction", "completed");
+    await setProcessingStep(supabase, state.sessionId, "saved_to_memory", "completed");
+
     state.status = "completed";
     console.log("[pipeline] Pipeline completed:", stats);
 
@@ -176,6 +194,16 @@ export async function runMeetingIngestionPipeline(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Pipeline failed";
     console.error("[pipeline] Error:", message);
+
+    const stepKey =
+      state.status === "transcribing" || state.status === "refining"
+        ? "validation_cleanup"
+        : state.status === "summarizing"
+          ? "summary_generation"
+          : state.status === "extracting_entities" || state.status === "extracting_relationships"
+            ? "entity_relationship_extraction"
+            : "saved_to_memory";
+    await setProcessingStep(supabase, state.sessionId, stepKey, "failed", message);
 
     state.status = "failed";
     state.errors.push({
@@ -221,6 +249,12 @@ export async function runEnhancementsPipeline(
   };
 
   if (!state.transcriptId) {
+    // Mark as failed if no transcript ID
+    await supabase
+      .from("sessions")
+      .update({ processing_state: "failed" })
+      .eq("id", state.sessionId);
+
     return {
       success: false,
       error: "No transcript ID available",
@@ -228,28 +262,43 @@ export async function runEnhancementsPipeline(
     };
   }
 
+  // Track current step for proper error handling
+  let currentStep = "validation_cleanup";
+
   try {
     // Step 1: Deep Refinement
+    currentStep = "validation_cleanup";
     console.log("[pipeline:enhancements] Starting refinement...");
+    await setProcessingStep(supabase, state.sessionId, "validation_cleanup", "active");
     const refineResult = await refineStep(state, supabase);
     if (refineResult.success && refineResult.data) {
       stats.refinementApplied = refineResult.data.modifiedCount > 0 || refineResult.data.deletedCount > 0;
     }
+    await setProcessingStep(supabase, state.sessionId, "validation_cleanup", "completed");
 
     // Step 2: Summary Generation
+    currentStep = "summary_generation";
     console.log("[pipeline:enhancements] Starting summary...");
+    await setProcessingStep(supabase, state.sessionId, "summary_generation", "active");
     const summarizeResult = await summarizeStep(state, supabase);
     stats.summaryGenerated = summarizeResult.success;
+    await setProcessingStep(supabase, state.sessionId, "summary_generation", "completed");
+    await setProcessingStep(supabase, state.sessionId, "action_item_extraction", "active");
+    await setProcessingStep(supabase, state.sessionId, "action_item_extraction", "completed");
 
     // Step 3: Entity Extraction
+    currentStep = "entity_relationship_extraction";
     console.log("[pipeline:enhancements] Starting entity extraction...");
+    await setProcessingStep(supabase, state.sessionId, "entity_relationship_extraction", "active");
     const entitiesResult = await extractEntitiesStep(state, supabase);
     if (entitiesResult.success && entitiesResult.data) {
       stats.entitiesExtracted = entitiesResult.data.extractedCount;
     }
 
     // Step 4: Embedding Generation
+    currentStep = "saved_to_memory";
     console.log("[pipeline:enhancements] Starting embeddings...");
+    await setProcessingStep(supabase, state.sessionId, "saved_to_memory", "active");
     const embeddingsResult = await generateEmbeddingsStep(state, supabase);
     if (embeddingsResult.success && embeddingsResult.data) {
       stats.embeddingsGenerated = embeddingsResult.data.chunkCount;
@@ -264,6 +313,9 @@ export async function runEnhancementsPipeline(
       }
     }
 
+    await setProcessingStep(supabase, state.sessionId, "entity_relationship_extraction", "completed");
+    await setProcessingStep(supabase, state.sessionId, "saved_to_memory", "completed");
+
     console.log("[pipeline:enhancements] Completed:", stats);
 
     return {
@@ -273,7 +325,22 @@ export async function runEnhancementsPipeline(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Enhancement pipeline failed";
-    console.error("[pipeline:enhancements] Error:", message);
+    console.error("[pipeline:enhancements] Error at step:", currentStep, message);
+
+    // Try to update database state - wrap in try-catch to ensure we return even if DB update fails
+    try {
+      // Mark the ACTUAL failing step as failed
+      await setProcessingStep(supabase, state.sessionId, currentStep, "failed", message);
+
+      // Update processing_state to failed so UI can show retry button
+      await supabase
+        .from("sessions")
+        .update({ processing_state: "failed" })
+        .eq("id", state.sessionId);
+    } catch (dbError) {
+      // Log but don't throw - we still want to return the error to caller
+      console.error("[pipeline:enhancements] Failed to update error state in DB:", dbError);
+    }
 
     return {
       success: false,

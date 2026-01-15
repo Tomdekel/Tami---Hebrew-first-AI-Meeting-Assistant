@@ -217,6 +217,29 @@ export async function POST(request: Request, { params }: RouteParams) {
           file.name
         );
 
+        const chunkRows = embeddings.map((emb) => ({
+          attachment_id: attachment.id,
+          session_id: id,
+          user_id: user.id,
+          chunk_index: emb.chunkIndex,
+          content: emb.content,
+          page_number: emb.metadata.pageNumber ?? null,
+          sheet_name: emb.metadata.sheetName ?? null,
+        }));
+
+        const { data: chunkRecords, error: chunkError } = await supabase
+          .from("attachment_chunks")
+          .upsert(chunkRows, { onConflict: "attachment_id,chunk_index" })
+          .select("id, chunk_index");
+
+        if (chunkError) {
+          console.error("Failed to save attachment chunks:", chunkError);
+        }
+
+        const chunkIdByIndex = new Map<number, string>(
+          (chunkRecords || []).map((row: { id: string; chunk_index: number }) => [row.chunk_index, row.id])
+        );
+
         // Store embeddings in memory_embeddings table
         if (embeddings.length > 0) {
           const embeddingRows = embeddings.map((emb) => ({
@@ -229,6 +252,9 @@ export async function POST(request: Request, { params }: RouteParams) {
               attachment_id: attachment.id,
               attachment_name: file.name,
               chunk_index: emb.chunkIndex,
+              chunk_id: chunkIdByIndex.get(emb.chunkIndex),
+              page_number: emb.metadata.pageNumber ?? null,
+              sheet_name: emb.metadata.sheetName ?? null,
               ...emb.metadata,
             },
           }));

@@ -68,6 +68,14 @@ export async function POST(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
+    // Idempotency check: prevent concurrent reprocess requests
+    if (session.status === "processing") {
+      return NextResponse.json(
+        { error: "Session is already being processed. Please wait." },
+        { status: 409 }
+      );
+    }
+
     const results: Record<string, { success: boolean; message?: string; error?: string }> = {};
     const shouldRunAll = steps.includes("all");
 
@@ -77,28 +85,37 @@ export async function POST(request: Request, { params }: RouteParams) {
         results.transcription = { success: false, error: "No audio file found" };
       } else {
         try {
-          // Update status to processing
+          // Reset status and processing state for fresh start
           await supabase
             .from("sessions")
             .update({
-              status: "processing",
+              status: "pending",
+              processing_state: "draft",
+              processing_steps: [],
+              current_step: null,
               transcription_job_id: null,
             })
             .eq("id", id);
 
-          // Delete existing transcript
-          const { data: existingTranscript } = await supabase
-            .from("transcripts")
-            .select("id")
-            .eq("session_id", id)
-            .single();
+          // Delete all related data for clean reprocess
+          // Order matters due to foreign key constraints
 
-          if (existingTranscript) {
-            await supabase
-              .from("transcripts")
-              .delete()
-              .eq("id", existingTranscript.id);
-          }
+          // 1. Delete entity mentions
+          await supabase.from("entity_mentions").delete().eq("session_id", id);
+
+          // 2. Delete embeddings/memory chunks
+          await supabase.from("memory_embeddings").delete().eq("session_id", id);
+
+          // 3. Delete action items
+          await supabase.from("action_items").delete().eq("session_id", id);
+
+          // 4. Delete summary
+          await supabase.from("summaries").delete().eq("session_id", id);
+
+          // 5. Delete transcript (segments cascade automatically)
+          await supabase.from("transcripts").delete().eq("session_id", id);
+
+          console.log(`[reprocess] Cleaned up all related data for session ${id}`);
 
           // Trigger transcription via the transcribe endpoint
           const baseUrl = getBaseUrl(request);

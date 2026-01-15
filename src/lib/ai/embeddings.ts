@@ -86,6 +86,7 @@ export function chunkTranscriptForEmbedding(
     speakerName?: string | null;
     text: string;
     startTime?: number | null;
+    segmentId?: string;
   }>
 ): Array<{
   text: string;
@@ -93,6 +94,7 @@ export function chunkTranscriptForEmbedding(
   speakerName: string | null;
   startTime: number | null;
   segmentIndices: number[];
+  segmentIds: string[];
 }> {
   const chunks: Array<{
     text: string;
@@ -100,6 +102,7 @@ export function chunkTranscriptForEmbedding(
     speakerName: string | null;
     startTime: number | null;
     segmentIndices: number[];
+    segmentIds: string[];
   }> = [];
 
   let currentChunk: {
@@ -108,6 +111,7 @@ export function chunkTranscriptForEmbedding(
     speakerName: string | null;
     startTime: number | null;
     segmentIndices: number[];
+    segmentIds: string[];
   } | null = null;
 
   const MAX_CHUNK_LENGTH = 2000; // ~500 tokens
@@ -132,6 +136,7 @@ export function chunkTranscriptForEmbedding(
           speakerName: currentChunk.speakerName,
           startTime: currentChunk.startTime,
           segmentIndices: currentChunk.segmentIndices,
+          segmentIds: currentChunk.segmentIds,
         });
       }
       currentChunk = {
@@ -140,10 +145,14 @@ export function chunkTranscriptForEmbedding(
         speakerName: segment.speakerName || segment.speakerId,
         startTime: segment.startTime ?? null,
         segmentIndices: [i],
+        segmentIds: segment.segmentId ? [segment.segmentId] : [],
       };
     } else if (currentChunk) {
       currentChunk.texts.push(segmentText);
       currentChunk.segmentIndices.push(i);
+      if (segment.segmentId) {
+        currentChunk.segmentIds.push(segment.segmentId);
+      }
     }
   }
 
@@ -155,6 +164,7 @@ export function chunkTranscriptForEmbedding(
       speakerName: currentChunk.speakerName,
       startTime: currentChunk.startTime,
       segmentIndices: currentChunk.segmentIndices,
+      segmentIds: currentChunk.segmentIds,
     });
   }
 

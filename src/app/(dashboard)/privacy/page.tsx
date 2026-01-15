@@ -1,5 +1,7 @@
+"use client"
+
 import { PrivacyPage } from "@/components/privacy-page"
 
-export default function Privacy() {
+export default function PrivacyRoutePage() {
   return <PrivacyPage />
 }

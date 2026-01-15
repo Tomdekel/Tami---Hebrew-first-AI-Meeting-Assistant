@@ -497,5 +497,22 @@
       "noSpeakersDetected": "No speakers detected",
       "uploadTranscript": "Upload Transcript"
     }
+  },
+  "settings": {
+    "title": "Settings",
+    "integrations": {
+      "title": "Calendar Integrations",
+      "description": "Connect your calendar to import meetings directly",
+      "google": "Google Calendar",
+      "outlook": "Outlook Calendar",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connected": "Connected",
+      "notConnected": "Not connected",
+      "expired": "Connection expired",
+      "connectingTo": "Connecting to {provider}...",
+      "disconnecting": "Disconnecting...",
+      "lastConnected": "Connected {date}"
+    }
   }
 }

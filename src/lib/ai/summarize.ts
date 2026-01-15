@@ -118,7 +118,7 @@ Output ALL content in ${isHebrew ? "Hebrew" : "the transcript's language"}.`;
     : `Transcript:\n${formattedTranscript}`;
 
   const response = await getOpenAI().chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -238,7 +238,12 @@ Output ALL content in ${isHebrew ? "Hebrew" : "the transcript's language"}.`;
     throw new Error("Failed to generate summary");
   }
 
-  const result = JSON.parse(functionCall.arguments) as SummaryResult;
+  let result: SummaryResult;
+  try {
+    result = JSON.parse(functionCall.arguments) as SummaryResult;
+  } catch (parseError) {
+    throw new Error("Failed to parse AI response: " + (parseError instanceof Error ? parseError.message : "Invalid JSON"));
+  }
 
   return {
     overview: result.overview || "",

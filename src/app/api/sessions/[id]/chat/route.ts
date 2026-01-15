@@ -1,15 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
-import { answerQuestionWithContext, type RetrievedContext, type TranscriptSegment } from "@/lib/ai/chat";
-import { generateEmbedding } from "@/lib/ai/embeddings";
-import { dedupeSegmentsByTimeAndText } from "@/lib/transcription/segments";
+import { answerQuestion } from "@/lib/ai/summarize";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-const MAX_CONTEXT_CHUNKS = 10;
-const SIMILARITY_THRESHOLD = 0.3;
+// Maximum segments to include in context (to avoid token limits)
+// 250 segments * ~100 chars average = ~25k chars, well within GPT-4o-mini's context
+const MAX_CONTEXT_SEGMENTS = 250;
+const MAX_QUESTION_LENGTH = 2000;
 
 // POST /api/sessions/[id]/chat - Ask a question about the meeting
 export async function POST(request: NextRequest, { params }: RouteParams) {
@@ -32,10 +32,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Question is required" }, { status: 400 });
   }
 
-  // Get the session with transcript
+  if (question.length > MAX_QUESTION_LENGTH) {
+    return NextResponse.json({ error: `Question too long (max ${MAX_QUESTION_LENGTH} chars)` }, { status: 400 });
+  }
+
+  // Get session with transcript
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("*, transcripts(*, transcript_segments(*))")
+    .select("id, title, context, detected_language, transcripts(id)")
     .eq("id", sessionId)
     .eq("user_id", user.id)
     .single();
@@ -44,94 +48,57 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Check if transcript exists
-  const transcript = session.transcripts?.[0];
-  if (!transcript || !transcript.transcript_segments?.length) {
+  const transcriptId = session.transcripts?.[0]?.id;
+  if (!transcriptId) {
     return NextResponse.json({ error: "No transcript available" }, { status: 400 });
   }
 
+  const language = session.detected_language === "he" ? "he" : "en";
+
   try {
-    // Save user question
-    await supabase.from("chat_messages").insert({
-      session_id: sessionId,
-      role: "user",
-      content: question,
-    });
+    // Fetch all transcript segments for this meeting
+    const { data: segments, error: segmentsError } = await supabase
+      .from("transcript_segments")
+      .select("speaker_name, speaker_id, text, segment_order")
+      .eq("transcript_id", transcriptId)
+      .order("segment_order", { ascending: true })
+      .limit(MAX_CONTEXT_SEGMENTS);
+
+    if (segmentsError) {
+      throw new Error("Failed to load transcript");
+    }
+
+    if (!segments || segments.length === 0) {
+      return NextResponse.json({
+        answer: language === "he" ? "אין תמלול זמין לפגישה זו." : "No transcript available for this meeting.",
+      });
+    }
 
     // Format segments for the AI
-    const sortedSegments = transcript.transcript_segments.sort(
-      (a: { segment_order: number }, b: { segment_order: number }) =>
-        a.segment_order - b.segment_order
-    );
-    // Cast to include time fields for deduplication (select(*) includes all fields)
-    const segmentsWithTimes = sortedSegments as Array<{
-      text: string;
-      start_time: number;
-      end_time: number;
-      speaker_name?: string;
-      speaker_id?: string;
-    }>;
-    const dedupedSegments = dedupeSegmentsByTimeAndText(segmentsWithTimes);
-    const segments: TranscriptSegment[] = dedupedSegments.map((seg) => ({
+    const formattedSegments = segments.map((seg) => ({
       speaker: seg.speaker_name || seg.speaker_id || "Unknown",
       text: seg.text,
     }));
 
-    // Generate embedding for the question
-    const questionEmbedding = await generateEmbedding(question);
-
-    // Search for relevant context using vector similarity
-    // This searches memory_embeddings which includes both transcript chunks and attachment chunks
-    const { data: relevantChunks, error: searchError } = await supabase
-      .rpc("match_embeddings", {
-        query_embedding: questionEmbedding.embedding,
-        match_threshold: SIMILARITY_THRESHOLD,
-        match_count: MAX_CONTEXT_CHUNKS,
-        p_session_id: sessionId,
-      });
-
-    let retrievedContext: RetrievedContext[] = [];
-
-    if (!searchError && relevantChunks && relevantChunks.length > 0) {
-      retrievedContext = relevantChunks.map((chunk: {
-        content: string;
-        metadata: {
-          source_type?: string;
-          attachment_name?: string;
-        } | null;
-        similarity: number;
-      }) => ({
-        content: chunk.content,
-        sourceType: chunk.metadata?.source_type === "attachment" ? "attachment" as const : "transcript" as const,
-        sourceName: chunk.metadata?.attachment_name,
-        similarity: chunk.similarity,
-      }));
-    }
-
-    // Get answer using RAG
-    const answer = await answerQuestionWithContext(
+    // Get a conversational answer using the full transcript as context
+    const answer = await answerQuestion(
       question,
-      retrievedContext,
-      segments,
+      formattedSegments,
       session.context || undefined,
-      session.detected_language || "en"
+      language
     );
 
-    // Save assistant response
-    const { data: chatMessage } = await supabase
-      .from("chat_messages")
-      .insert({
+    // Save the conversation to chat history
+    await supabase.from("chat_messages").insert([
+      { session_id: sessionId, role: "user", content: question },
+      {
         session_id: sessionId,
         role: "assistant",
         content: answer,
-      })
-      .select()
-      .single();
+      },
+    ]);
 
-    return NextResponse.json({
-      answer,
-      messageId: chatMessage?.id,
-    });
+    return NextResponse.json({ answer });
   } catch (error) {
     console.error("Chat failed:", error);
     return NextResponse.json(
@@ -155,7 +122,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Verify user owns the session
   const { data: session } = await supabase
     .from("sessions")
     .select("id")
@@ -167,7 +133,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Get chat history
   const { data: messages, error } = await supabase
     .from("chat_messages")
     .select("*")

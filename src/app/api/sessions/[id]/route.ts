@@ -76,15 +76,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     ...session,
     transcript: transcript
       ? {
-          ...transcript,
-          segments: dedupedSegments,
-        }
+        ...transcript,
+        segments: dedupedSegments,
+      }
       : undefined,
     summary: summary
       ? {
-          ...summary,
-          action_items: summary.action_items || [],
-        }
+        ...summary,
+        action_items: summary.action_items || [],
+      }
       : undefined,
     tags,
   };
@@ -150,16 +150,57 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Delete session (cascades to related records)
-  const { error } = await supabase
-    .from("sessions")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id);
+  try {
+    // 1. Clean up Neo4j Knowledge Graph
+    // remove session node, relationships, and decrement mention counts on entities
+    try {
+      const { runQuery } = await import("@/lib/neo4j/client");
+      await runQuery(
+        `
+        MATCH (s:Session {id: $sessionId})
+        OPTIONAL MATCH (e:Entity)-[r:MENTIONED_IN]->(s)
+        SET e.mention_count = CASE 
+          WHEN e.mention_count > 0 THEN e.mention_count - 1 
+          ELSE 0 
+        END
+        DELETE r
+        DETACH DELETE s
+        `,
+        { sessionId: id }
+      );
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+      // Optional: Delete orphaned entities (mention_count = 0)
+      // This is a design choice - keeping them might be useful for history, 
+      // but deleting them keeps the graph clean exactly as requested.
+      await runQuery(
+        `
+        MATCH (e:Entity)
+        WHERE e.mention_count = 0 AND e.is_user_created = false
+        DETACH DELETE e
+        `
+      );
+    } catch (graphError) {
+      console.error("Failed to clean up Knowledge Graph:", graphError);
+      // Continue with deletion even if graph fails (don't block user)
+    }
+
+    // 2. Explicitly delete embeddings (in case cascade is not set up)
+    await supabase.from("memory_embeddings").delete().eq("session_id", id);
+
+    // 3. Delete session (cascades to transcripts, segments, summaries if FK configured)
+    const { error } = await supabase
+      .from("sessions")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Delete session error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true });
 }

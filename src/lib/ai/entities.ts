@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import blocklistConfig from "@/config/entity-blocklist.json";
 
 let openaiClient: OpenAI | null = null;
 
@@ -23,27 +24,11 @@ export type EntityType =
   | "other";
 
 /**
- * Blocklist of generic/noisy organizations that should be filtered out.
- * These are mentioned so frequently they provide no meaningful signal.
+ * Blocklist of generic/noisy organizations and technologies.
+ * Imported from configuration file.
  */
-const BLOCKLIST_ORGANIZATIONS = new Set([
-  // Big Tech
-  "microsoft", "google", "amazon", "apple", "meta", "facebook",
-  "ibm", "intel", "cisco", "oracle", "salesforce", "adobe",
-  "netflix", "uber", "lyft", "airbnb", "twitter", "linkedin",
-  "slack", "zoom", "dropbox", "spotify", "tesla", "aws",
-  "openai", "anthropic", "nvidia", "samsung", "sony",
-  // Common generics
-  "the company", "the organization", "our company", "the team",
-]);
-
-/**
- * Blocklist of generic technologies/products that are too common
- */
-const BLOCKLIST_TECHNOLOGY = new Set([
-  "ai", "ml", "api", "saas", "paas", "crm", "erp",
-  "the product", "the platform", "the system",
-]);
+const BLOCKLIST_ORGANIZATIONS = new Set(blocklistConfig.organizations);
+const BLOCKLIST_TECHNOLOGY = new Set(blocklistConfig.technologies);
 
 /**
  * Check if an entity should be filtered out based on blocklists
@@ -79,14 +64,47 @@ interface TranscriptSegment {
   text: string;
 }
 
+const CHUNK_SIZE_SEGMENTS = 25; // Approx 10-15 mins of conversation per chunk
+
 /**
  * Extract entities from transcript using GPT-4o-mini
+ * Implements chunking for large transcripts
  */
 export async function extractEntities(
   segments: TranscriptSegment[],
   language: string = "en"
 ): Promise<EntityExtractionResult> {
-  const formattedTranscript = segments
+  // Split segments into chunks to avoid token limits
+  const chunks: TranscriptSegment[][] = [];
+  for (let i = 0; i < segments.length; i += CHUNK_SIZE_SEGMENTS) {
+    chunks.push(segments.slice(i, i + CHUNK_SIZE_SEGMENTS));
+  }
+
+  const allEntities: ExtractedEntity[] = [];
+
+  // Process chunks in parallel (with some concurrency limit if needed, but 3-4 chunks is usually fine)
+  // For very long meetings, we might want to process sequentially or semi-parallel
+  console.log(`[extractEntities] Processing ${chunks.length} chunks...`);
+  const results = await Promise.all(
+    chunks.map((chunk) => extractEntitiesFromChunk(chunk, language))
+  );
+
+  // Merge results
+  for (const result of results) {
+    allEntities.push(...result.entities);
+  }
+
+  // Deduplicate and aggregate mentions across chunks
+  const mergedEntities = mergeEntities(allEntities);
+
+  return { entities: mergedEntities };
+}
+
+async function extractEntitiesFromChunk(
+  chunk: TranscriptSegment[],
+  language: string
+): Promise<EntityExtractionResult> {
+  const formattedTranscript = chunk
     .map((seg) => `${seg.speaker}: ${seg.text}`)
     .join("\n");
 
@@ -177,7 +195,7 @@ Return unique entities only. Normalize names (e.g., "Dan" and "Danny" -> "Daniel
                   },
                   mentions: {
                     type: "number",
-                    description: "Approximate number of times mentioned",
+                    description: "Approximate number of times mentioned in this chunk",
                   },
                   context: {
                     type: "string",
@@ -204,16 +222,34 @@ Return unique entities only. Normalize names (e.g., "Dan" and "Danny" -> "Daniel
 
   const result = JSON.parse(functionCall.arguments) as EntityExtractionResult;
 
-  // Filter out blocklisted entities and map to proper format
+  // Filter out blocklisted entities
   const filteredEntities = (result.entities || [])
-    .map((entity) => ({
-      type: entity.type,
-      value: entity.value,
-      normalizedValue: entity.normalizedValue || entity.value,
-      mentions: entity.mentions || 1,
-      context: entity.context || "",
-    }))
     .filter((entity) => !shouldFilterEntity(entity));
 
   return { entities: filteredEntities };
 }
+
+/**
+ * Merge entities extracted from different chunks
+ */
+function mergeEntities(entities: ExtractedEntity[]): ExtractedEntity[] {
+  const mergedMap = new Map<string, ExtractedEntity>();
+
+  for (const entity of entities) {
+    const key = `${entity.type}:${entity.normalizedValue.toLowerCase()}`;
+
+    if (mergedMap.has(key)) {
+      const existing = mergedMap.get(key)!;
+      existing.mentions += entity.mentions;
+      // Keep the longer/more descriptive context or just append
+      if (entity.context.length > existing.context.length) {
+        existing.context = entity.context;
+      }
+    } else {
+      mergedMap.set(key, { ...entity });
+    }
+  }
+
+  return Array.from(mergedMap.values());
+}
+

@@ -3,6 +3,7 @@ export type Language = "he" | "en" | "auto";
 export type EntityType = "person" | "organization" | "project" | "topic" | "location" | "date" | "product" | "technology" | "other";
 export type TagSource = "manual" | "auto:person" | "auto:organization" | "auto:project" | "auto:topic";
 export type ChatRole = "user" | "assistant";
+export type ProcessingState = "draft" | "processing" | "completed" | "failed";
 
 // Transcript ingestion types
 export type SourceType = "recorded" | "imported" | "summary_only";
@@ -28,6 +29,15 @@ export interface Session {
   source_metadata: Record<string, unknown>;
   has_timestamps: boolean;
   ingestion_confidence: IngestionConfidence;
+  processing_state: ProcessingState;
+  processing_steps: Array<{
+    step: string;
+    status: "pending" | "active" | "completed" | "failed";
+    startedAt?: string | null;
+    finishedAt?: string | null;
+    error?: string | null;
+  }>;
+  current_step: string | null;
 }
 
 export interface Transcript {
@@ -130,6 +140,7 @@ export interface ChatMessage {
   session_id: string;
   role: ChatRole;
   content: string;
+  evidence_json?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -139,10 +150,14 @@ export interface MemoryEmbeddingMetadata {
   person_id?: string;
   startTime?: number;
   segmentIndices?: number[];
+  segmentIds?: string[];
   source_type?: "transcript" | "attachment";
   attachment_id?: string;
   attachment_name?: string;
   chunk_index?: number;
+  chunk_id?: string;
+  page_number?: number;
+  sheet_name?: string;
 }
 
 export interface MemoryEmbedding {
@@ -193,6 +208,52 @@ export interface SpeakerAssignmentEvent {
   old_person_id: string | null;
   new_person_id: string | null;
   created_at: string;
+}
+
+export interface MemoryChat {
+  id: string;
+  user_id: string;
+  title: string | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+}
+
+export interface MemoryMessage {
+  id: string;
+  chat_id: string;
+  role: ChatRole;
+  content: string;
+  evidence_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AttachmentChunk {
+  id: string;
+  attachment_id: string;
+  session_id: string;
+  user_id: string;
+  chunk_index: number;
+  content: string;
+  page_number: number | null;
+  sheet_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntegrationConnection {
+  id: string;
+  user_id: string;
+  provider: "google" | "outlook";
+  access_token: string;
+  refresh_token: string | null;
+  expires_at: string | null;
+  scope: string | null;
+  token_type: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export type RelationshipSuggestionStatus = "pending" | "approved" | "rejected";

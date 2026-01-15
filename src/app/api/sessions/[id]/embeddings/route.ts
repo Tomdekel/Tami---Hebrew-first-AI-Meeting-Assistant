@@ -93,6 +93,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         transcripts (
           id,
           transcript_segments (
+            id,
             speaker_id,
             speaker_name,
             text,
@@ -131,11 +132,13 @@ export async function POST(request: Request, { params }: RouteParams) {
     const dedupedSegments = dedupeSegmentsByTimeAndText(sortedSegments);
     const mappedSegments = dedupedSegments.map(
       (seg: {
+        id: string;
         speaker_id: string;
         speaker_name?: string;
         text: string;
         start_time?: number;
       }) => ({
+        segmentId: seg.id,
         speakerId: seg.speaker_id,
         speakerName: seg.speaker_name,
         text: seg.text,
@@ -167,6 +170,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         speakerName: chunk.speakerName,
         startTime: chunk.startTime,
         segmentIndices: chunk.segmentIndices,
+        segmentIds: chunk.segmentIds,
       },
     }));
 

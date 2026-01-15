@@ -12,6 +12,7 @@ import {
   initializePipelineState,
   runEnhancementsPipeline,
 } from "@/lib/pipelines/meeting-ingestion";
+import { setProcessingStep } from "@/lib/pipelines/meeting-ingestion/processing-state";
 
 const DEFAULT_PROCESSING_TIMEOUT_MINUTES = 180;
 const DEFAULT_ORPHANED_JOB_GRACE_MINUTES = 10;
@@ -81,6 +82,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .update({ status: "expired", transcription_job_id: null })
       .eq("id", sessionId);
 
+    await setProcessingStep(supabase, sessionId, "validation_cleanup", "failed", "Transcription timed out");
+
     return NextResponse.json({
       status: "expired",
       completed: false,
@@ -96,6 +99,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .from("sessions")
         .update({ status: "failed", transcription_job_id: null })
         .eq("id", sessionId);
+
+      await setProcessingStep(supabase, sessionId, "validation_cleanup", "failed", "Transcription job orphaned");
 
       return NextResponse.json({
         status: "failed",
@@ -121,34 +126,25 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (jobStatus.status === "COMPLETED") {
       const result = transcriptionService.parseAsyncJobOutput(jobStatus);
 
-      // Check if transcript already exists (retry scenario)
-      const { data: existingTranscript } = await supabase
+      // Use upsert to prevent race condition creating duplicate transcripts
+      // If transcript exists for this session, update it; otherwise insert new one
+      const { data: transcript, error: transcriptError } = await supabase
         .from("transcripts")
-        .select("id")
-        .eq("session_id", sessionId)
-        .single();
-
-      let transcript;
-      if (existingTranscript) {
-        console.log(`[transcription-status] Using existing transcript for ${sessionId}`);
-        transcript = existingTranscript;
-      } else {
-        // Save new transcript
-        const { data: newTranscript, error: transcriptError } = await supabase
-          .from("transcripts")
-          .insert({
+        .upsert(
+          {
             session_id: sessionId,
             language: result.language,
             full_text: result.fullText,
-          })
-          .select()
-          .single();
+          },
+          { onConflict: "session_id" }
+        )
+        .select()
+        .single();
 
-        if (transcriptError) {
-          throw new Error(`Failed to save transcript: ${transcriptError.message}`);
-        }
-        transcript = newTranscript;
+      if (transcriptError) {
+        throw new Error(`Failed to save transcript: ${transcriptError.message}`);
       }
+      console.log(`[transcription-status] Saved transcript ${transcript.id} for ${sessionId}`);
 
       // Save transcript segments
       if (result.segments.length > 0) {
@@ -203,9 +199,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       state.transcriptionResult = result;
 
       // Run enhancements in background (don't block response)
-      runEnhancementsPipeline(supabase, state).catch((err) => {
-        console.error("[transcription-status] Enhancement pipeline failed:", err);
-      });
+      // NOTE: Error handling is now done inside runEnhancementsPipeline which updates DB state
+      runEnhancementsPipeline(supabase, state)
+        .then((result) => {
+          if (!result.success) {
+            console.error("[transcription-status] Enhancement pipeline failed:", result.error);
+            // State already updated in runEnhancementsPipeline
+          } else {
+            console.log("[transcription-status] Enhancement pipeline completed successfully");
+          }
+        })
+        .catch(async (err) => {
+          // This catches unexpected errors not handled by runEnhancementsPipeline
+          console.error("[transcription-status] Enhancement pipeline threw unexpected error:", err);
+          try {
+            await supabase
+              .from("sessions")
+              .update({ processing_state: "failed" })
+              .eq("id", sessionId);
+            await setProcessingStep(supabase, sessionId, "saved_to_memory", "failed",
+              err instanceof Error ? err.message : "Enhancement pipeline crashed");
+          } catch (dbErr) {
+            console.error("[transcription-status] Failed to update error state:", dbErr);
+          }
+        });
 
       return NextResponse.json({
         status: "completed",
@@ -241,25 +258,42 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .update({ status: "failed", transcription_job_id: null })
         .eq("id", sessionId);
 
+      await setProcessingStep(supabase, sessionId, "validation_cleanup", "failed", userError);
+
+      // Log full error details server-side for debugging
+      console.error("[transcription-status] Job failed details:", {
+        sessionId,
+        jobId: session.transcription_job_id,
+        jobStatus: jobStatus.status,
+        technicalError: jobStatus.error,
+      });
+
+      // Return sanitized error to client (no internal details)
       return NextResponse.json({
         status: "failed",
         completed: false,
         error: userError,
-        details: {
-          jobId: session.transcription_job_id,
-          jobStatus: jobStatus.status,
-          technicalError: jobStatus.error,
-        },
       });
     }
 
     // Still processing (IN_QUEUE or IN_PROGRESS)
-    return NextResponse.json({
-      status: "processing",
-      completed: false,
-      jobStatus: jobStatus.status,
-      jobId: session.transcription_job_id,
-    });
+    // Add recommended polling interval to prevent excessive requests
+    const pollingInterval = jobStatus.status === "IN_QUEUE" ? 5 : 3; // seconds
+    return NextResponse.json(
+      {
+        status: "processing",
+        completed: false,
+        jobStatus: jobStatus.status,
+        jobId: session.transcription_job_id,
+        retryAfter: pollingInterval,
+      },
+      {
+        headers: {
+          "Retry-After": String(pollingInterval),
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     console.error("[transcription-status] Error:", {
       sessionId,

@@ -142,3 +142,17 @@ export function isPersonQuery(query: string): boolean {
   const parsed = parseQueryIntent(query);
   return parsed.type === "person_filter";
 }
+
+export function isQuestionQuery(query: string): boolean {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes("?")) return true;
+
+  const questionStarters = [
+    /^(what|why|how|when|where|who|which)\b/i,
+    /^(did|do|does|can|could|should|would|is|are|was|were)\b/i,
+    /^(מה|למה|איך|מתי|איפה|מי|איזה|האם)\b/i,
+  ];
+
+  return questionStarters.some((pattern) => pattern.test(trimmed));
+}
