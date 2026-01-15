@@ -2,12 +2,18 @@
  * Graph Visualization API
  *
  * GET /api/graph/visualize - Get graph data for visualization
+ *
+ * Refactored to use Postgres as primary data source for reliability.
+ * Neo4j is used only for explicit relationships (additive).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { runQuery } from "@/lib/neo4j/client";
 import { GraphNode, GraphEdge } from "@/lib/neo4j/types";
+
+// Entities appearing in more than this % of sessions are considered noise
+const NOISE_THRESHOLD = 0.4;
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -21,143 +27,176 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams;
   const entityId = searchParams.get("entityId");
-  const depth = parseInt(searchParams.get("depth") || "2");
-  const limit = parseInt(searchParams.get("limit") || "50");
+
+  // Validate and bound input parameters
+  const rawLimit = parseInt(searchParams.get("limit") || "50");
+  const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 200);
 
   try {
-    let results: Record<string, unknown>[];
+    // Step 1: Fetch entities from Postgres (primary source)
+    let entitiesQuery = supabase
+      .from("entities")
+      .select("id, value, type, normalized_value, mention_count")
+      .eq("user_id", user.id)
+      .order("mention_count", { ascending: false });
 
     if (entityId) {
-      // Subgraph around specific entity
-      results = await runQuery(
-        `
-        MATCH (start:Entity {id: $entityId, user_id: $userId})
-        OPTIONAL MATCH path = (start)-[*1..${depth}]-(connected)
-        WHERE connected:Entity OR connected:Meeting OR connected:ActionItem
-        WITH start,
-             collect(DISTINCT connected) as connected_nodes,
-             [r IN collect(DISTINCT relationships(path)) | r] as all_rels
-        RETURN start,
-               connected_nodes,
-               reduce(rels = [], rel_list IN all_rels |
-                 rels + [r IN rel_list WHERE r IS NOT NULL]
-               ) as relationships
-        `,
-        { entityId, userId: user.id }
-      );
+      // For entity-specific view, we'll handle this differently
+      entitiesQuery = entitiesQuery.eq("id", entityId);
     } else {
-      // Full user graph (limited to top entities)
-      results = await runQuery(
-        `
-        MATCH (e:Entity {user_id: $userId})
-        WITH e ORDER BY e.mention_count DESC LIMIT $limit
-        OPTIONAL MATCH (e)-[r]-(connected)
-        WHERE (connected:Entity AND connected.user_id = $userId)
-           OR connected:Meeting
-           OR connected:ActionItem
-        WITH collect(DISTINCT e) as entities,
-             collect(DISTINCT connected) as connected,
-             collect(DISTINCT r) as relationships
-        RETURN entities + [c IN connected WHERE c IS NOT NULL] as nodes,
-               relationships
-        `,
-        { userId: user.id, limit }
-      );
+      entitiesQuery = entitiesQuery.limit(limit * 2); // Fetch extra for filtering
     }
 
-    if (results.length === 0) {
+    const { data: allEntities, error: entitiesError } = await entitiesQuery;
+
+    if (entitiesError) {
+      console.error("Error fetching entities:", entitiesError);
+      return NextResponse.json({ error: "Failed to fetch entities" }, { status: 500 });
+    }
+
+    if (!allEntities || allEntities.length === 0) {
       return NextResponse.json({ nodes: [], edges: [] });
     }
 
-    const result = results[0];
+    const entityIds = allEntities.map(e => e.id);
 
-    // Process nodes
+    // Step 2: Get total session count for frequency filtering
+    const { count: totalSessions } = await supabase
+      .from("sessions")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id);
+
+    // Step 3: Get session counts per entity for frequency filtering
+    const { data: allMentions } = await supabase
+      .from("entity_mentions")
+      .select("entity_id, session_id")
+      .in("entity_id", entityIds);
+
+    // Calculate unique session count per entity
+    const entitySessionCount = new Map<string, Set<string>>();
+    if (allMentions) {
+      for (const mention of allMentions) {
+        if (!entitySessionCount.has(mention.entity_id)) {
+          entitySessionCount.set(mention.entity_id, new Set());
+        }
+        entitySessionCount.get(mention.entity_id)!.add(mention.session_id);
+      }
+    }
+
+    // Step 4: Filter out noisy entities (appear in too many sessions)
+    const filteredEntities = allEntities.filter(entity => {
+      if (!totalSessions || totalSessions === 0) return true;
+      const sessionCount = entitySessionCount.get(entity.id)?.size || 0;
+      const ratio = sessionCount / totalSessions;
+      return ratio <= NOISE_THRESHOLD;
+    }).slice(0, limit); // Apply limit after filtering
+
+    if (filteredEntities.length === 0) {
+      return NextResponse.json({ nodes: [], edges: [] });
+    }
+
+    // Step 5: Build nodes map
     const nodesMap = new Map<string, GraphNode>();
-
-    // Handle start node for entity-specific query
-    if (result.start) {
-      const startNode = result.start as Record<string, unknown>;
-      const startLabels = (startNode._labels as string[]) || [];
-      nodesMap.set(startNode.id as string, {
-        id: startNode.id as string,
-        label:
-          (startNode.display_value as string) ||
-          (startNode.normalized_value as string),
-        type: startLabels.find((l) => l !== "Entity") || "Entity",
-        mention_count: startNode.mention_count as number,
-        ...startNode,
+    for (const entity of filteredEntities) {
+      nodesMap.set(entity.id, {
+        id: entity.id,
+        label: entity.value,
+        type: entity.type || "Unknown",
+        mention_count: entity.mention_count || 1,
+        normalized_value: entity.normalized_value,
       });
     }
 
-    // Handle nodes array
-    const nodesArray = (result.nodes ||
-      result.connected_nodes ||
-      []) as Record<string, unknown>[];
-    for (const node of nodesArray) {
-      if (!node) continue;
-
-      const id = node.id as string;
-      if (!id || nodesMap.has(id)) continue;
-
-      const labels = (node._labels as string[]) || [];
-      const type = labels.find(
-        (l) => l !== "Entity" && l !== "Meeting" && l !== "ActionItem"
-      );
-
-      nodesMap.set(id, {
-        id,
-        label:
-          (node.display_value as string) ||
-          (node.title as string) ||
-          (node.description as string)?.slice(0, 30) ||
-          (node.normalized_value as string) ||
-          id.slice(0, 8),
-        type: type || labels[0] || "Unknown",
-        mention_count: node.mention_count as number,
-        ...node,
-      });
-    }
-
-    // Process relationships/edges
+    // Step 6: Build co-mention edges from Postgres
     const edges: GraphEdge[] = [];
     const seenEdges = new Set<string>();
+    const filteredEntityIds = new Set(filteredEntities.map(e => e.id));
 
-    const relationships = (result.relationships || []) as Record<
-      string,
-      unknown
-    >[];
-    for (const rel of relationships) {
-      if (!rel) continue;
+    // Group mentions by session
+    const sessionToEntities = new Map<string, string[]>();
+    if (allMentions) {
+      for (const mention of allMentions) {
+        // Only include entities that passed filtering
+        if (!filteredEntityIds.has(mention.entity_id)) continue;
 
-      // Handle both direct relationships and nested relationship objects
-      const relType = (rel._type as string) || (rel.type as string);
-      const startId =
-        (rel.startNodeElementId as string) ||
-        (rel.start as string) ||
-        (rel.from as string);
-      const endId =
-        (rel.endNodeElementId as string) ||
-        (rel.end as string) ||
-        (rel.to as string);
+        if (!sessionToEntities.has(mention.session_id)) {
+          sessionToEntities.set(mention.session_id, []);
+        }
+        sessionToEntities.get(mention.session_id)!.push(mention.entity_id);
+      }
+    }
 
-      if (!startId || !endId || !relType) continue;
+    // Create edges between entities in same session
+    for (const [, sessionEntityIds] of sessionToEntities) {
+      // Need at least 2 entities in same session to create an edge
+      if (sessionEntityIds.length < 2) continue;
 
-      // Extract just the ID if it's a full element ID
-      const sourceId = startId.includes(":")
-        ? startId.split(":").pop()!
-        : startId;
-      const targetId = endId.includes(":") ? endId.split(":").pop()! : endId;
+      // Create edges between pairs
+      for (let i = 0; i < sessionEntityIds.length; i++) {
+        for (let j = i + 1; j < sessionEntityIds.length; j++) {
+          const [sourceId, targetId] = [sessionEntityIds[i], sessionEntityIds[j]].sort();
+          const edgeKey = `${sourceId}-MENTIONED_TOGETHER-${targetId}`;
 
-      const edgeKey = `${sourceId}-${relType}-${targetId}`;
-      if (seenEdges.has(edgeKey)) continue;
-      seenEdges.add(edgeKey);
+          if (!seenEdges.has(edgeKey)) {
+            seenEdges.add(edgeKey);
+            edges.push({
+              source: sourceId,
+              target: targetId,
+              type: "MENTIONED_TOGETHER",
+            });
+          }
+        }
+      }
+    }
 
-      edges.push({
-        source: sourceId,
-        target: targetId,
-        type: relType,
-        ...(rel as object),
-      });
+    // Step 7: Try to add explicit Neo4j relationships (if configured)
+    if (process.env.NEO4J_URI && process.env.NEO4J_USERNAME && process.env.NEO4J_PASSWORD) {
+      try {
+        const neo4jIds = Array.from(filteredEntityIds);
+        const neo4jResults = await runQuery(
+          `
+          MATCH (source:Entity {user_id: $userId})-[r]->(target:Entity {user_id: $userId})
+          WHERE source.id IN $entityIds AND target.id IN $entityIds
+          AND type(r) <> 'MENTIONED_IN'
+          RETURN source.id as sourceId, target.id as targetId, type(r) as type
+          `,
+          { userId: user.id, entityIds: neo4jIds }
+        );
+
+        // Add Neo4j relationships (these override MENTIONED_TOGETHER)
+        for (const rel of neo4jResults) {
+          const sourceId = rel.sourceId as string;
+          const targetId = rel.targetId as string;
+          const relType = rel.type as string;
+
+          if (!sourceId || !targetId || !relType) continue;
+
+          // Check if we already have a MENTIONED_TOGETHER edge between these
+          const mentionedKey = `${[sourceId, targetId].sort().join("-")}-MENTIONED_TOGETHER-${[sourceId, targetId].sort().join("-")}`.split("-").slice(0, 3).join("-");
+
+          // Remove the MENTIONED_TOGETHER edge if we have an explicit relationship
+          const existingIndex = edges.findIndex(e =>
+            (e.source === sourceId && e.target === targetId && e.type === "MENTIONED_TOGETHER") ||
+            (e.source === targetId && e.target === sourceId && e.type === "MENTIONED_TOGETHER")
+          );
+          if (existingIndex !== -1) {
+            edges.splice(existingIndex, 1);
+          }
+
+          const edgeKey = `${sourceId}-${relType}-${targetId}`;
+          if (!seenEdges.has(edgeKey)) {
+            seenEdges.add(edgeKey);
+            edges.push({
+              source: sourceId,
+              target: targetId,
+              type: relType,
+            });
+          }
+        }
+      } catch (neo4jError) {
+        // Neo4j is optional - log and continue
+        console.log("Neo4j query failed (optional):", neo4jError);
+      }
     }
 
     return NextResponse.json({

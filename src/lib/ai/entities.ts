@@ -22,6 +22,46 @@ export type EntityType =
   | "technology"
   | "other";
 
+/**
+ * Blocklist of generic/noisy organizations that should be filtered out.
+ * These are mentioned so frequently they provide no meaningful signal.
+ */
+const BLOCKLIST_ORGANIZATIONS = new Set([
+  // Big Tech
+  "microsoft", "google", "amazon", "apple", "meta", "facebook",
+  "ibm", "intel", "cisco", "oracle", "salesforce", "adobe",
+  "netflix", "uber", "lyft", "airbnb", "twitter", "linkedin",
+  "slack", "zoom", "dropbox", "spotify", "tesla", "aws",
+  "openai", "anthropic", "nvidia", "samsung", "sony",
+  // Common generics
+  "the company", "the organization", "our company", "the team",
+]);
+
+/**
+ * Blocklist of generic technologies/products that are too common
+ */
+const BLOCKLIST_TECHNOLOGY = new Set([
+  "ai", "ml", "api", "saas", "paas", "crm", "erp",
+  "the product", "the platform", "the system",
+]);
+
+/**
+ * Check if an entity should be filtered out based on blocklists
+ */
+function shouldFilterEntity(entity: { type: string; normalizedValue: string }): boolean {
+  const normalized = entity.normalizedValue.toLowerCase().trim();
+
+  if (entity.type === "organization" && BLOCKLIST_ORGANIZATIONS.has(normalized)) {
+    return true;
+  }
+
+  if ((entity.type === "technology" || entity.type === "product") && BLOCKLIST_TECHNOLOGY.has(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
 export interface ExtractedEntity {
   type: EntityType;
   value: string;
@@ -53,28 +93,46 @@ export async function extractEntities(
   const isHebrew = language === "he";
 
   const systemPrompt = isHebrew
-    ? `אתה מומחה בחילוץ ישויות מתמלולי פגישות. זהה את הישויות הבאות:
-- אנשים (person): שמות של אנשים שהוזכרו
-- ארגונים (organization): חברות, צוותים, מחלקות
-- פרויקטים (project): שמות של פרויקטים או יוזמות
-- נושאים (topic): נושאים מרכזיים שנדונו
-- מיקומים (location): מקומות שהוזכרו
-- תאריכים (date): תאריכים או זמנים ספציפיים
-- מוצרים (product): שמות מוצרים
-- טכנולוגיות (technology): טכנולוגיות, כלים, שפות תכנות
+    ? `אתה מומחה בחילוץ ישויות מתמלולי פגישות.
+
+חלץ רק את הישויות הבאות:
+- אנשים (person): שמות של אנשים אמיתיים (לא "דובר 1", "Speaker 2")
+- ארגונים (organization): חברות, צוותים, מחלקות עם שמות ספציפיים
+- פרויקטים (project): שמות של פרויקטים או יוזמות ספציפיות
+- נושאים (topic): נושאים מרכזיים שנדונו בעומק (לא אזכורים חולפים)
+- מיקומים (location): מקומות גיאוגרפיים ספציפיים
+- תאריכים (date): תאריכים ספציפיים בלבד (לא משכי זמן כמו "שבוע", "חודש", "שעות")
+- מוצרים (product): שמות מוצרים ספציפיים
+- טכנולוגיות (technology): טכנולוגיות, כלים, שפות תכנות ספציפיות
+
+אל תחלץ:
+- תוויות דוברים ("דובר 1", "Speaker 2")
+- יחסים משפחתיים ("אשתי", "החבר", "המנהל")
+- משכי זמן ("שבוע", "חודש", "שעות", "ימים")
+- התייחסויות כלליות ("החברה", "המוצר", "הפרויקט")
+- מילים גנריות מדי כמו "AI", "conversion"
 
 החזר ישויות ייחודיות בלבד. נרמל שמות (למשל "דני" ו"דניאל" -> "דניאל").`
-    : `You are an expert at extracting entities from meeting transcripts. Identify the following entities:
-- person: Names of people mentioned
-- organization: Companies, teams, departments
-- project: Names of projects or initiatives
-- topic: Main topics discussed
-- location: Places mentioned
-- date: Specific dates or times mentioned
-- product: Product names
-- technology: Technologies, tools, programming languages
+    : `You are an expert at extracting entities from meeting transcripts.
 
-Return unique entities only. Normalize names (e.g., "Dan" and "Danny" -> "Daniel" if referring to same person).`;
+Extract ONLY these entities:
+- person: Real people's names (NOT "Speaker 1", "Speaker 2")
+- organization: Companies, teams, departments with specific names
+- project: Specific project or initiative names
+- topic: Major topics discussed in depth (not passing mentions)
+- location: Specific geographic places
+- date: Specific dates ONLY (NOT durations like "a week", "month", "hours")
+- product: Specific product names
+- technology: Specific technologies, tools, programming languages
+
+DO NOT extract:
+- Speaker labels ("Speaker 1", "Speaker 2", "דובר 1")
+- Relationships ("my wife", "the manager", "his friend")
+- Time durations ("week", "month", "few days", "hours", "next month")
+- Generic references ("the company", "the product", "the project")
+- Overly generic terms like "AI", "conversion", "growth"
+
+Return unique entities only. Normalize names (e.g., "Dan" and "Danny" -> "Daniel").`;
 
   const response = await getOpenAI().chat.completions.create({
     model: "gpt-4o-mini",
@@ -146,13 +204,16 @@ Return unique entities only. Normalize names (e.g., "Dan" and "Danny" -> "Daniel
 
   const result = JSON.parse(functionCall.arguments) as EntityExtractionResult;
 
-  return {
-    entities: (result.entities || []).map((entity) => ({
+  // Filter out blocklisted entities and map to proper format
+  const filteredEntities = (result.entities || [])
+    .map((entity) => ({
       type: entity.type,
       value: entity.value,
       normalizedValue: entity.normalizedValue || entity.value,
       mentions: entity.mentions || 1,
       context: entity.context || "",
-    })),
-  };
+    }))
+    .filter((entity) => !shouldFilterEntity(entity));
+
+  return { entities: filteredEntities };
 }
