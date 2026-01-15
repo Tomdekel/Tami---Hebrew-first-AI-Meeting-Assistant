@@ -266,7 +266,7 @@ export function MemoryPage() {
       <div className="mt-2 rounded-lg border border-border bg-white p-3">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Quote className="h-4 w-4 text-teal-600" />
-          <span>{isRTL ? "אזכורים מדויקים" : "Exact mentions"}</span>
+          <span>{isRTL ? "מקורות" : "Sources"}</span>
         </div>
         <div className="mt-3 space-y-3">
           {mentions.map((mention) => (
@@ -525,7 +525,7 @@ export function MemoryPage() {
                           <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
                             <div className="flex items-center gap-2">
                               <AlertCircle className="h-4 w-4" />
-                              <span>{isRTL ? "לא נמצאו ראיות" : "No evidence found"}</span>
+                              <span>...</span>
                             </div>
                           </div>
                         )}
@@ -548,7 +548,7 @@ export function MemoryPage() {
                       </AvatarFallback>
                     </Avatar>
                     <div className="rounded-lg px-3 py-2 text-sm bg-muted animate-pulse">
-                      {isRTL ? "מחפש..." : "Searching..."}
+                      {isRTL ? "..." : "..."}
                     </div>
                   </div>
                 )}

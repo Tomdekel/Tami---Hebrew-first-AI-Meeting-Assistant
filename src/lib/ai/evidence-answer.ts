@@ -68,8 +68,8 @@ export async function generateAiAnswerFromEvidence(
   }));
 
   const systemPrompt = isHebrew
-    ? "אתה עוזר שעונה על שאלות אך ורק על בסיס הראיות שסופקו. עבור כל פסקה חייבות להיות ציטוטים שמפנים ל-quoteId או chunkId מהרשימה. אם אין ראיות מספקות, אל תענה."
-    : "You answer questions using ONLY the provided evidence. Each paragraph MUST include citations referencing quoteId or chunkId from the evidence list. If evidence is insufficient, do not answer.";
+    ? "אתה עוזר שעונה על שאלות אך ורק על בסיס המקורות שסופקו. עבור כל פסקה חייבות להיות ציטוטים שמפנים ל-quoteId או chunkId מהרשימה. אם אין מקורות מספקים, אל תענה."
+    : "You answer questions using ONLY the provided sources. Each paragraph MUST include citations referencing quoteId or chunkId from the source list. If sources are insufficient, do not answer.";
 
   const userPrompt = {
     question,

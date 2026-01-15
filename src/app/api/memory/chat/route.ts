@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseQueryIntent, isQuestionQuery } from "@/lib/ai/query-parser";
 import { generateAiAnswerFromEvidence, type EvidenceQuote } from "@/lib/ai/evidence-answer";
 import { buildIlikeFilter, extractKeywords, formatTimestamp } from "@/lib/search/keyword";
+import { generateEmbedding } from "@/lib/ai/embeddings";
+import { searchEmbeddings } from "@/lib/search/vector";
 import { SupabaseClient } from "@supabase/supabase-js";
 
 const MAX_EXACT_MENTIONS = 40;
@@ -487,8 +489,87 @@ export async function POST(request: NextRequest) {
       language
     );
 
-    // Prioritize summaries first (most concise), then transcripts, then attachments
-    const exactMentions = [...summaryMentions, ...transcriptMentions, ...attachmentMentions].slice(0, MAX_EXACT_MENTIONS);
+    // --- Vector Search ---
+    let vectorMentions: ExactMention[] = [];
+    try {
+      const { embedding } = await generateEmbedding(question);
+      const vectorResults = await searchEmbeddings(supabase, embedding, {
+        match_threshold: 0.4, // Slightly lower threshold for semantic recall
+        match_count: 20,
+        session_id: null, // Global search (filtered by user_id in RPC)
+      });
+
+      // Filter vector results to only include allowed sessions
+      const allowedVectorResults = vectorResults.filter(r => sessionIds.includes(r.session_id));
+
+      for (const res of allowedVectorResults) {
+        const session = sessionsMap.get(res.session_id);
+        if (!session) continue;
+
+        const meetingDate = session.created_at
+          ? new Date(session.created_at).toLocaleDateString(language === "he" ? "he-IL" : "en-US")
+          : undefined;
+
+        const metadata = res.metadata || {};
+        // Determine source type and deep link
+        let sourceType: "meeting" | "doc" | "summary" = "meeting";
+        let deepLink = `/meetings/${res.session_id}`;
+        let quoteId = `vec_${res.id}`;
+        let additionalProps: any = {};
+
+        if (metadata.source_type === "summary") {
+          sourceType = "summary";
+          quoteId = `vec_sum_${metadata.summary_id}_${metadata.summary_field}`;
+          additionalProps = { summaryField: metadata.summary_field };
+        } else if (metadata.segmentIds && metadata.segmentIds.length > 0) {
+          // It's a transcript chunk
+          const firstSegId = metadata.segmentIds[0];
+          const tStart = metadata.startTime;
+          deepLink = `/meetings/${res.session_id}?t=${Math.floor(tStart || 0)}&seg=${firstSegId}`;
+          quoteId = `vec_seg_${firstSegId}`; // Attempt to match ID format if possible, but safely unique
+          additionalProps = {
+            speaker: metadata.speakerName,
+            tStart: metadata.startTime,
+            segmentId: firstSegId
+          };
+        }
+
+        vectorMentions.push({
+          quoteId,
+          text: res.content, // Chunk content might be larger than segment, but good for context
+          meetingId: res.session_id,
+          meetingTitle: session.title,
+          meetingDate,
+          sourceType,
+          deepLink,
+          ...additionalProps
+        });
+      }
+    } catch (err) {
+      console.warn("Vector search failed, proceeding with keywords only:", err);
+    }
+
+    // specific deduplication logic
+    const seenQuotes = new Set<string>();
+    const allMentions = [...summaryMentions, ...transcriptMentions, ...attachmentMentions, ...vectorMentions];
+    const uniqueMentions: ExactMention[] = [];
+
+    for (const m of allMentions) {
+      // Create a unique key based on content and session to dedupe exact semantic duplicates
+      // Or use quoteId if robust.
+      // Vector chunks might overlap with exact segments.
+      // If we have a vector match that covers the same time range as a transcript match, we might prefer one.
+      // For now, simple ID-based dedupe + content overlap check could be complex.
+      // Let's stick to ID if possible, but vector IDs are different.
+      // We'll use a rough content+session key.
+      const key = `${m.meetingId}_${m.text.substring(0, 50)}`;
+      if (seenQuotes.has(key)) continue;
+      seenQuotes.add(key);
+      uniqueMentions.push(m);
+    }
+
+    // Prioritize summaries first (most concise), then remaining
+    const exactMentions = uniqueMentions.slice(0, MAX_EXACT_MENTIONS);
     const evidence: EvidenceQuote[] = exactMentions.map((mention) => ({
       quoteId: mention.quoteId,
       text: mention.text,
@@ -509,7 +590,7 @@ export async function POST(request: NextRequest) {
 
     const fallbackAnswer = exactMentions.length > 0
       ? (language === "he" ? "נמצאו אזכורים מדויקים." : "Exact mentions found.")
-      : (language === "he" ? "לא נמצאו ראיות." : "No evidence found.");
+      : (language === "he" ? "..." : "...");
 
     const answer = aiAnswer?.paragraphs.map((p) => p.text).join("\n\n") || fallbackAnswer;
     const sources = toSources(exactMentions);
