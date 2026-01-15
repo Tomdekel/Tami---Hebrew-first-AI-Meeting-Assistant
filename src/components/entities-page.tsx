@@ -288,17 +288,29 @@ function GraphView({
   // Filter entities by type
   const filteredEntities = filterTypes.length > 0 ? entities.filter((e) => filterTypes.includes(e.typeId)) : entities
 
-  // Initialize nodes with dynamic center
+  // Initialize nodes spread across the canvas
   useEffect(() => {
     const centerX = canvasSize.width / 2
     const centerY = canvasSize.height / 2
+    const nodeCount = filteredEntities.length
+
+    // Calculate grid-like initial positions for better spread
+    const cols = Math.ceil(Math.sqrt(nodeCount * (canvasSize.width / canvasSize.height)))
+    const rows = Math.ceil(nodeCount / cols)
+    const spacingX = canvasSize.width / (cols + 1)
+    const spacingY = canvasSize.height / (rows + 1)
+
     const initialNodes: GraphNode[] = filteredEntities.map((entity, i) => {
-      const angle = (2 * Math.PI * i) / Math.max(filteredEntities.length, 1)
-      const radius = Math.min(canvasSize.width, canvasSize.height) * 0.25 + Math.random() * 50
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      // Grid position with some randomness to avoid perfect alignment
+      const x = spacingX * (col + 1) + (Math.random() - 0.5) * spacingX * 0.5
+      const y = spacingY * (row + 1) + (Math.random() - 0.5) * spacingY * 0.5
+
       return {
         id: entity.id,
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius,
+        x,
+        y,
         vx: 0,
         vy: 0,
         entity,
@@ -310,7 +322,7 @@ function GraphView({
 
   // Force simulation with alpha decay (simulation cools down and stops)
   const alphaRef = useRef(1) // Simulation energy - decays over time
-  const alphaDecay = 0.02 // How fast simulation cools (higher = faster stop)
+  const alphaDecay = 0.01 // Slower decay - gives time to spread out
   const alphaMin = 0.001 // When to stop simulation completely
 
   useEffect(() => {
@@ -332,24 +344,38 @@ function GraphView({
         const newNodes = prevNodes.map((node) => ({ ...node }))
         const alpha = alphaRef.current // Current simulation energy
 
+        // Minimum distance between nodes (prevents overlap)
+        const minDistance = 80
+
         // Apply forces (scaled by alpha so they weaken as simulation cools)
         for (let i = 0; i < newNodes.length; i++) {
           const node = newNodes[i]
 
-          // Repulsion from other nodes (reduced and scaled by alpha)
+          // Repulsion from other nodes - STRONG to spread them out
           for (let j = 0; j < newNodes.length; j++) {
             if (i === j) continue
             const other = newNodes[j]
             const dx = node.x - other.x
             const dy = node.y - other.y
             const dist = Math.sqrt(dx * dx + dy * dy) || 1
-            // Much lower repulsion (500) scaled by alpha
-            const force = (500 / (dist * dist)) * alpha
-            node.vx += (dx / dist) * force
-            node.vy += (dy / dist) * force
+
+            // Strong repulsion when too close, weaker at distance
+            if (dist < minDistance * 3) {
+              // Collision avoidance - very strong when overlapping
+              const force = (3000 / (dist * dist)) * alpha
+              node.vx += (dx / dist) * force
+              node.vy += (dy / dist) * force
+            }
+
+            // Hard separation - push apart if within minimum distance
+            if (dist < minDistance) {
+              const overlap = minDistance - dist
+              node.vx += (dx / dist) * overlap * 0.5
+              node.vy += (dy / dist) * overlap * 0.5
+            }
           }
 
-          // Attraction along edges (scaled by alpha)
+          // Attraction along edges - WEAK to prevent clustering
           const nodeRelationships = relationships.filter((r) => r.sourceId === node.id || r.targetId === node.id)
           for (const rel of nodeRelationships) {
             const otherId = rel.sourceId === node.id ? rel.targetId : rel.sourceId
@@ -358,24 +384,27 @@ function GraphView({
               const dx = other.x - node.x
               const dy = other.y - node.y
               const dist = Math.sqrt(dx * dx + dy * dy) || 1
-              const force = dist * 0.008 * alpha
-              node.vx += (dx / dist) * force
-              node.vy += (dy / dist) * force
+              // Only attract if nodes are far apart (>200px)
+              if (dist > 200) {
+                const force = (dist - 200) * 0.002 * alpha
+                node.vx += (dx / dist) * force
+                node.vy += (dy / dist) * force
+              }
             }
           }
 
-          // Center gravity (scaled by alpha)
+          // Very weak center gravity (just to keep graph on screen)
           const centerX = canvasSize.width / 2
           const centerY = canvasSize.height / 2
-          node.vx += (centerX - node.x) * 0.0005 * alpha
-          node.vy += (centerY - node.y) * 0.0005 * alpha
+          node.vx += (centerX - node.x) * 0.0001 * alpha
+          node.vy += (centerY - node.y) * 0.0001 * alpha
 
-          // Strong damping (0.7 = lose 30% velocity per frame)
-          node.vx *= 0.7
-          node.vy *= 0.7
+          // Moderate damping (0.8 = lose 20% velocity per frame)
+          node.vx *= 0.8
+          node.vy *= 0.8
 
-          // Low velocity cap
-          const maxVelocity = 3
+          // Higher velocity cap to allow spreading
+          const maxVelocity = 6
           const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy)
           if (speed > maxVelocity) {
             node.vx = (node.vx / speed) * maxVelocity
