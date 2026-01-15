@@ -107,46 +107,58 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Step 6: Build co-mention edges from Postgres
+    // Step 6: Build co-mention edges from Postgres with WEIGHT tracking
     const edges: GraphEdge[] = [];
-    const seenEdges = new Set<string>();
+    const edgeWeights = new Map<string, number>(); // Track co-occurrence count
     const filteredEntityIds = new Set(filteredEntities.map(e => e.id));
 
     // Group mentions by session
-    const sessionToEntities = new Map<string, string[]>();
+    const sessionToEntities = new Map<string, Set<string>>();
     if (allMentions) {
       for (const mention of allMentions) {
         // Only include entities that passed filtering
         if (!filteredEntityIds.has(mention.entity_id)) continue;
 
         if (!sessionToEntities.has(mention.session_id)) {
-          sessionToEntities.set(mention.session_id, []);
+          sessionToEntities.set(mention.session_id, new Set());
         }
-        sessionToEntities.get(mention.session_id)!.push(mention.entity_id);
+        sessionToEntities.get(mention.session_id)!.add(mention.entity_id);
       }
     }
 
-    // Create edges between entities in same session
-    for (const [, sessionEntityIds] of sessionToEntities) {
-      // Need at least 2 entities in same session to create an edge
+    // Count co-occurrences (how many sessions had both entities)
+    for (const [, sessionEntitySet] of sessionToEntities) {
+      const sessionEntityIds = Array.from(sessionEntitySet);
       if (sessionEntityIds.length < 2) continue;
 
-      // Create edges between pairs
       for (let i = 0; i < sessionEntityIds.length; i++) {
         for (let j = i + 1; j < sessionEntityIds.length; j++) {
           const [sourceId, targetId] = [sessionEntityIds[i], sessionEntityIds[j]].sort();
-          const edgeKey = `${sourceId}-MENTIONED_TOGETHER-${targetId}`;
-
-          if (!seenEdges.has(edgeKey)) {
-            seenEdges.add(edgeKey);
-            edges.push({
-              source: sourceId,
-              target: targetId,
-              type: "MENTIONED_TOGETHER",
-            });
-          }
+          const edgeKey = `${sourceId}-${targetId}`;
+          edgeWeights.set(edgeKey, (edgeWeights.get(edgeKey) || 0) + 1);
         }
       }
+    }
+
+    // Only create edges for meaningful co-occurrences (2+ meetings)
+    // Also limit total edges to prevent visual overload
+    const MIN_COOCCURRENCE = 2;
+    const MAX_EDGES = 100;
+
+    // Sort edges by weight (highest first) and filter
+    const sortedEdges = Array.from(edgeWeights.entries())
+      .filter(([, weight]) => weight >= MIN_COOCCURRENCE)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, MAX_EDGES);
+
+    for (const [edgeKey, weight] of sortedEdges) {
+      const [sourceId, targetId] = edgeKey.split('-');
+      edges.push({
+        source: sourceId,
+        target: targetId,
+        type: "MENTIONED_TOGETHER",
+        weight, // Include weight for frontend use
+      });
     }
 
     // Step 7: Try to add explicit Neo4j relationships (if configured)
