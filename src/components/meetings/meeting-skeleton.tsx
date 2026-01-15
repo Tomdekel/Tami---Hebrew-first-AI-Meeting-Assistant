@@ -3,21 +3,27 @@
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 
-export function MeetingSkeleton() {
+interface MeetingSkeletonProps {
+  showAudioPlayer?: boolean
+}
+
+export function MeetingSkeleton({ showAudioPlayer = true }: MeetingSkeletonProps) {
   return (
     <div className="space-y-4">
       {/* Audio player skeleton */}
-      <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg">
-        <Skeleton className="h-10 w-10 rounded-full" />
-        <div className="flex-1 space-y-2">
-          <Skeleton className="h-2 w-full" />
-          <div className="flex justify-between">
-            <Skeleton className="h-3 w-12" />
-            <Skeleton className="h-3 w-12" />
+      {showAudioPlayer && (
+        <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg">
+          <Skeleton className="h-10 w-10 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-2 w-full" />
+            <div className="flex justify-between">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-3 w-12" />
+            </div>
           </div>
+          <Skeleton className="h-8 w-8 rounded" />
         </div>
-        <Skeleton className="h-8 w-8 rounded" />
-      </div>
+      )}
 
       {/* Summary and cards grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

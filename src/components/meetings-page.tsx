@@ -135,12 +135,16 @@ function getSourceLabel(session: Session, isRTL: boolean) {
 
 type EmptyStateSection = "summary" | "decisions" | "tasks" | "transcript" | "documents" | "chat"
 
-function getSectionStatus(session: Session, hasContent: boolean, sectionType?: EmptyStateSection) {
-  if (session.processing_state === "processing" || session.status === "processing" || session.status === "pending") {
+function getSectionStatus(session: Session | MeetingListItem | null | undefined, hasContent: boolean, sectionType?: EmptyStateSection) {
+  if (!session) return "empty"
+  const status = (session as MeetingListItem).status
+  const processingState = (session as Session).processing_state
+
+  if (processingState === "processing" || status === "processing" || status === "pending") {
     return "processing"
   }
-  if (session.processing_state === "draft") return "draft"
-  if (session.processing_state === "failed" || session.status === "failed") return "failed"
+  if (processingState === "draft" || status === "draft") return "draft"
+  if (processingState === "failed" || status === "failed") return "failed"
 
   // Return section-specific empty states
   if (!hasContent && sectionType) {
@@ -219,7 +223,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
 
   const searchParams = useSearchParams()
 
-  const { data: session } = useSessionQuery(selectedMeetingId)
+  const { data: session, isPending: isLoadingSessionDetail } = useSessionQuery(selectedMeetingId)
   // Poll for transcription status updates when session is processing
   useTranscriptionStatusPolling(session)
   const { data: speakersData = [] } = useSpeakersQuery(selectedMeetingId)
@@ -864,12 +868,20 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   }
 
   const selectedMeeting = meetingsList.find((meeting) => meeting.id === selectedMeetingId)
-  const isDraft = session?.processing_state === "draft"
+
+  // A session is truly a draft only if both processing_state and status indicate no processing
+  // If status is "processing" or "pending", the transcription has started even if processing_state is outdated
+  const isDraft = (session?.processing_state === "draft" || (!session && selectedMeeting?.status === "draft")) &&
+    session?.status !== "processing" &&
+    session?.status !== "pending" &&
+    session?.status !== "completed"
+
   const isProcessing =
-    session &&
-    !isDraft &&
-    (session.processing_state === "processing" || session.status === "processing" || session.status === "pending")
-  const isFailed = session && (session.processing_state === "failed" || session.status === "failed")
+    (session && (session.processing_state === "processing" || session.status === "processing" || session.status === "pending")) ||
+    (!session && selectedMeeting?.status === "processing")
+
+  const isFailed = (session && (session.processing_state === "failed" || session.status === "failed")) ||
+    (!session && selectedMeeting?.status === "failed")
 
   const summaryText = session?.summary?.overview
   const decisions = session?.summary?.decisions || session?.summary?.key_points || []
@@ -983,7 +995,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                       <h1 className="text-lg md:text-xl font-semibold text-foreground line-clamp-1">
                         {selectedMeeting.title}
                       </h1>
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={handleStartEditTitle}>
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={handleStartEditTitle} disabled={isProcessing || isFailed}>
                         <Pencil className="w-4 h-4 text-muted-foreground" />
                       </Button>
                     </>
@@ -1004,7 +1016,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5" />
-                    {speakers.length} {isRTL ? "משתתפים" : "participants"}
+                    {session ? speakers.length : selectedMeeting.participants.length} {isRTL ? "משתתפים" : "participants"}
                   </span>
                 </div>
                 {selectedMeeting.context && (
@@ -1046,6 +1058,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   size="sm"
                   onClick={() => setShowDocuments(!showDocuments)}
                   className={showDocuments ? "bg-teal-600 hover:bg-teal-700" : ""}
+                  disabled={isProcessing || isFailed}
                 >
                   <FileText className="w-4 h-4" />
                   <span className="hidden lg:inline ms-2">{isRTL ? "מסמכים" : "Docs"}</span>
@@ -1104,16 +1117,16 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
           </div>
         )}
 
-        {session && isProcessing && !isStuck && (
+        {isProcessing && !isStuck && (
           <div className="mx-4 md:mx-6 mt-4 px-3 py-2 rounded-lg border border-teal-200 bg-teal-50/50 flex items-center gap-3">
             <span className="text-sm text-teal-700 whitespace-nowrap">{isRTL ? "מעבד:" : "Processing:"}</span>
             <ProcessingStepper
-              steps={(session.processing_steps || []).map(s => ({ step: s.step as ProcessingStepKey, status: s.status as ProcessingStepStatus }))}
+              steps={(session?.processing_steps || []).map(s => ({ step: s.step as ProcessingStepKey, status: s.status as ProcessingStepStatus }))}
             />
           </div>
         )}
 
-        {session && isStuck && (
+        {isStuck && (
           <Card className="mx-4 md:mx-6 mt-4 border-orange-200 bg-orange-50/50">
             <CardContent className="p-3 md:p-4">
               <div className="flex items-center justify-between">
@@ -1130,7 +1143,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   variant="outline"
                   onClick={handleRetryProcessing}
                   className="border-orange-300 text-orange-700 hover:bg-orange-100 bg-transparent"
-                  disabled={!session.audio_url || isRetrying}
+                  disabled={!session?.audio_url || isRetrying}
                 >
                   <RefreshCw className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2", isRetrying && "animate-spin")} />
                   {isRetrying ? (isRTL ? "מעבד..." : "Processing...") : (isRTL ? "נסה שוב" : "Retry")}
@@ -1140,7 +1153,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
           </Card>
         )}
 
-        {session && isDraft && (
+        {isDraft && (
           <div className="mx-4 md:mx-6 mt-4 p-3 rounded-lg border border-amber-200 bg-amber-50/50 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-amber-600 flex-shrink-0" />
@@ -1154,7 +1167,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
               variant="outline"
               onClick={handleRetryProcessing}
               className="border-amber-300 text-amber-800 hover:bg-amber-100 bg-transparent flex-shrink-0"
-              disabled={!session.audio_url || isRetrying}
+              disabled={!session?.audio_url || isRetrying}
             >
               {isRetrying && <Loader2 className={cn("w-4 h-4 animate-spin", isRTL ? "ml-2" : "mr-2")} />}
               {isRetrying ? (isRTL ? "מתחיל..." : "Starting...") : (isRTL ? "התחל עיבוד" : "Start processing")}
@@ -1162,7 +1175,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
           </div>
         )}
 
-        {session && isFailed && (
+        {isFailed && (
           <Card className="mx-4 md:mx-6 mt-4 border-red-200 bg-red-50/50">
             <CardContent className="p-3 md:p-4">
               <div className="flex items-center justify-between">
@@ -1179,7 +1192,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   variant="outline"
                   onClick={handleRetryProcessing}
                   className="border-red-300 text-red-700 hover:bg-red-100 bg-transparent"
-                  disabled={!session.audio_url || isRetrying}
+                  disabled={!session?.audio_url || isRetrying}
                 >
                   <RefreshCw className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2", isRetrying && "animate-spin")} />
                   {isRetrying ? (isRTL ? "מעבד..." : "Processing...") : (isRTL ? "נסה שוב" : "Retry")}
@@ -1210,9 +1223,13 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                 </CardContent>
               </Card>
             </div>
-          ) : !session ? (
+          ) : (isLoadingSessionDetail && !selectedMeeting) ? (
             <div className="p-4 md:p-6">
               <MeetingSkeleton />
+            </div>
+          ) : !session && !isProcessing && !isFailed && !isDraft ? (
+            <div className="p-4 md:p-6">
+              <MeetingSkeleton showAudioPlayer={false} />
             </div>
           ) : (
             <div className="space-y-4">
@@ -1274,7 +1291,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                     ) : summaryText ? (
                       <p className="text-sm text-foreground leading-relaxed">{summaryText}</p>
                     ) : (
-                      <StatusEmptyState status={getSectionStatus(session, !!summaryText, "summary")} />
+                      <StatusEmptyState status={getSectionStatus(session || selectedMeeting, !!summaryText, "summary")} />
                     )}
                   </CardContent>
                 </Card>
@@ -1393,8 +1410,8 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                           </div>
                         ))}
                       </div>
-                    ) : !showNewTask ? (
-                      <StatusEmptyState status={getSectionStatus(session, actionItems.length > 0, "tasks")} />
+                    ) : (isProcessing || isFailed || !showNewTask) ? (
+                      <StatusEmptyState status={getSectionStatus(session || selectedMeeting, actionItems.length > 0, "tasks")} />
                     ) : null}
                     {showNewTask && (
                       <div className="p-2 rounded border border-border space-y-2 mt-1">
@@ -1512,8 +1529,8 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                           </div>
                         ))}
                       </div>
-                    ) : !showNewDecision ? (
-                      <StatusEmptyState status={getSectionStatus(session, localDecisions.length > 0, "decisions")} />
+                    ) : (isProcessing || isFailed || !showNewDecision) ? (
+                      <StatusEmptyState status={getSectionStatus(session || selectedMeeting, localDecisions.length > 0, "decisions")} />
                     ) : null}
                     {showNewDecision && (
                       <div className="flex gap-2 p-2 bg-white border border-border rounded mt-1">
@@ -1560,72 +1577,73 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                       {speakers.map((speaker) => {
                         const speakerColor = getSpeakerColor(speaker.speakerId)
                         return (
-                        <div key={speaker.speakerId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg group">
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback className={cn(speakerColor.bg, speakerColor.text, "text-xs")}>
-                              {getInitials(speaker.speakerName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          {editingSpeakerId === speaker.speakerId ? (
-                            <div className="flex items-center gap-1">
-                              <Input
-                                value={editingSpeakerName}
-                                onChange={(e) => setEditingSpeakerName(e.target.value)}
-                                className="w-28 h-7 text-sm"
-                                autoFocus
-                                list={mergedSuggestions.length > 0 ? "speaker-suggestions" : undefined}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") handleSaveSpeaker()
-                                  if (e.key === "Escape") setEditingSpeakerId(null)
-                                }}
-                              />
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveSpeaker}>
-                                <Check className="w-3 h-3 text-green-600" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <>
-                              <div>
-                                <p className="text-sm font-medium">{speaker.speakerName}</p>
-                                <p className="text-xs text-muted-foreground">{speaker.segmentCount} {isRTL ? "קטעים" : "segments"}</p>
+                          <div key={speaker.speakerId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg group">
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback className={cn(speakerColor.bg, speakerColor.text, "text-xs")}>
+                                {getInitials(speaker.speakerName)}
+                              </AvatarFallback>
+                            </Avatar>
+                            {editingSpeakerId === speaker.speakerId ? (
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  value={editingSpeakerName}
+                                  onChange={(e) => setEditingSpeakerName(e.target.value)}
+                                  className="w-28 h-7 text-sm"
+                                  autoFocus
+                                  list={mergedSuggestions.length > 0 ? "speaker-suggestions" : undefined}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleSaveSpeaker()
+                                    if (e.key === "Escape") setEditingSpeakerId(null)
+                                  }}
+                                />
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveSpeaker}>
+                                  <Check className="w-3 h-3 text-green-600" />
+                                </Button>
                               </div>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 w-6 p-0 md:opacity-0 group-hover:opacity-100 transition-opacity"
-                                    aria-label={isRTL ? `פעולות עבור ${speaker.speakerName}` : `Actions for ${speaker.speakerName}`}
-                                  >
-                                    <MoreHorizontal className="w-3 h-3" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
-                                    <Pencil className="w-3 h-3 me-2" />
-                                    {isRTL ? "שנה שם" : "Rename"}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenMerge(speaker)}>
-                                    <GitMerge className="w-3 h-3 me-2" />
-                                    {isRTL ? "מזג עם דובר אחר" : "Merge with another"}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      // TODO: API call to delete speaker
-                                      toast({ title: isRTL ? "דובר נמחק" : "Speaker deleted" })
-                                    }}
-                                    className="text-red-600"
-                                  >
-                                    <Trash2 className="w-3 h-3 me-2" />
-                                    {isRTL ? "מחק" : "Delete"}
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </>
-                          )}
-                        </div>
-                      )})}
+                            ) : (
+                              <>
+                                <div>
+                                  <p className="text-sm font-medium">{speaker.speakerName}</p>
+                                  <p className="text-xs text-muted-foreground">{speaker.segmentCount} {isRTL ? "קטעים" : "segments"}</p>
+                                </div>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 md:opacity-0 group-hover:opacity-100 transition-opacity"
+                                      aria-label={isRTL ? `פעולות עבור ${speaker.speakerName}` : `Actions for ${speaker.speakerName}`}
+                                    >
+                                      <MoreHorizontal className="w-3 h-3" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
+                                      <Pencil className="w-3 h-3 me-2" />
+                                      {isRTL ? "שנה שם" : "Rename"}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleOpenMerge(speaker)}>
+                                      <GitMerge className="w-3 h-3 me-2" />
+                                      {isRTL ? "מזג עם דובר אחר" : "Merge with another"}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        // TODO: API call to delete speaker
+                                        toast({ title: isRTL ? "דובר נמחק" : "Speaker deleted" })
+                                      }}
+                                      className="text-red-600"
+                                    >
+                                      <Trash2 className="w-3 h-3 me-2" />
+                                      {isRTL ? "מחק" : "Delete"}
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                     {mergedSuggestions.length > 0 && (
                       <datalist id="speaker-suggestions">
@@ -1637,7 +1655,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   </CardContent>
                 </Card>
 
-                {showDocuments && (
+                {showDocuments && session && (
                   <Card className="lg:col-span-2 overflow-hidden">
                     {isProcessing || isFailed || session.processing_state === "draft" ? (
                       <StatusEmptyState
@@ -1650,7 +1668,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   </Card>
                 )}
 
-                {showChat && (
+                {showChat && session && (
                   <Card className="lg:col-span-2 overflow-hidden h-[520px]">
                     {isProcessing || isFailed || session.processing_state === "draft" ? (
                       <StatusEmptyState
