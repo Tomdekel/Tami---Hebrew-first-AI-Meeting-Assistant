@@ -15,7 +15,7 @@ import { GraphNode, GraphEdge } from "@/lib/neo4j/types";
 // Entities appearing in more than this % of sessions are considered noise
 const NOISE_THRESHOLD = 0.4;
 // Minimum sessions needed for noise filtering to be meaningful
-const MIN_SESSIONS_FOR_NOISE_FILTER = 5;
+const MIN_SESSIONS_FOR_NOISE_FILTER = 10;
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();

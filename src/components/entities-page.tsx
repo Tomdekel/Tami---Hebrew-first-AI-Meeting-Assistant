@@ -110,7 +110,7 @@ const defaultEntityTypes: EntityType[] = [
     color: "bg-blue-100 text-blue-700",
     nodeColor: "#3B82F6",
     description: "אנשים שהוזכרו בפגישות",
-    count: 12,
+    count: 0,
     isDefault: true,
   },
   {
@@ -121,7 +121,7 @@ const defaultEntityTypes: EntityType[] = [
     color: "bg-purple-100 text-purple-700",
     nodeColor: "#8B5CF6",
     description: "חברות וארגונים",
-    count: 5,
+    count: 0,
     isDefault: true,
   },
   {
@@ -132,7 +132,7 @@ const defaultEntityTypes: EntityType[] = [
     color: "bg-amber-100 text-amber-700",
     nodeColor: "#F59E0B",
     description: "פרויקטים ויוזמות",
-    count: 8,
+    count: 0,
     isDefault: true,
   },
   {
@@ -143,7 +143,7 @@ const defaultEntityTypes: EntityType[] = [
     color: "bg-green-100 text-green-700",
     nodeColor: "#10B981",
     description: "משימות והחלטות",
-    count: 15,
+    count: 0,
     isDefault: true,
   },
   {
@@ -154,7 +154,7 @@ const defaultEntityTypes: EntityType[] = [
     color: "bg-teal-100 text-teal-700",
     nodeColor: "#14B8A6",
     description: "נושאים שנדונו",
-    count: 20,
+    count: 0,
     isDefault: true,
   },
   {
@@ -395,7 +395,7 @@ function GraphView({
           ctx.beginPath()
           ctx.moveTo(source.x, source.y)
           ctx.lineTo(target.x, target.y)
-          ctx.strokeStyle = "rgba(100, 116, 139, 0.4)" // Visible but not overwhelming
+          ctx.strokeStyle = "rgba(100, 116, 139, 0.6)" // Visible but not overwhelming
           ctx.lineWidth = 1
           ctx.stroke()
         } else if (isActiveEdge) {
@@ -735,7 +735,7 @@ export function EntitiesPage() {
     const matchesType = selectedTypeId ? e.typeId === selectedTypeId : true
     const matchesSearch = search
       ? e.name.toLowerCase().includes(search.toLowerCase()) ||
-        Object.values(e.metadata || {}).some((v) => v.toLowerCase().includes(search.toLowerCase()))
+      Object.values(e.metadata || {}).some((v) => v.toLowerCase().includes(search.toLowerCase()))
       : true
     return matchesType && matchesSearch
   })
@@ -825,11 +825,11 @@ export function EntitiesPage() {
             .map((e) =>
               e.id === mergeTarget
                 ? {
-                    ...e,
-                    mentionCount: e.mentionCount + mergeSource.mentionCount,
-                    meetingCount: Math.max(e.meetingCount, mergeSource.meetingCount),
-                    meetings: [...e.meetings, ...mergeSource.meetings].slice(0, 5),
-                  }
+                  ...e,
+                  mentionCount: e.mentionCount + mergeSource.mentionCount,
+                  meetingCount: Math.max(e.meetingCount, mergeSource.meetingCount),
+                  meetings: [...e.meetings, ...mergeSource.meetings].slice(0, 5),
+                }
                 : e,
             ),
         )
@@ -992,124 +992,124 @@ export function EntitiesPage() {
               />
             </div>
           ) : (
-          <ScrollArea className="flex-1 p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredEntities.map((entity) => {
-                const type = getEntityType(entity.typeId)
-                return (
-                  <Card
-                    key={entity.id}
-                    className={cn(
-                      "cursor-pointer hover:border-teal-300 transition-colors",
-                      selectedEntity?.id === entity.id && "border-teal-500",
-                    )}
-                    onClick={() => setSelectedEntity(entity)}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-3">
-                          <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center", type?.color)}>
-                            {type?.icon}
-                          </div>
-                          <div>
-                            {editingEntityId === entity.id ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  value={editingEntityName}
-                                  onChange={(e) => setEditingEntityName(e.target.value)}
-                                  className="h-7 text-sm w-32"
-                                  autoFocus
-                                  onClick={(e) => e.stopPropagation()}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") handleSaveEntity()
-                                    if (e.key === "Escape") setEditingEntityId(null)
-                                  }}
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleSaveEntity()
-                                  }}
-                                >
-                                  <CheckSquare className="w-3 h-3 text-green-600" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <h3 className="font-medium text-foreground">{entity.name}</h3>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                              {entity.mentionCount} {isRTL ? "אזכורים" : "mentions"}
-                            </p>
-                          </div>
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleEditEntity(entity)
-                              }}
-                            >
-                              <Pencil className="w-3 h-3 mr-2" />
-                              {isRTL ? "ערוך" : "Edit"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleOpenMerge(entity)
-                              }}
-                            >
-                              <GitMerge className="w-3 h-3 mr-2" />
-                              {isRTL ? "מזג" : "Merge"}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDeleteEntity(entity.id)
-                              }}
-                              className="text-red-600"
-                            >
-                              <Trash2 className="w-3 h-3 mr-2" />
-                              {isRTL ? "מחק" : "Delete"}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-
-                      {entity.snippets && entity.snippets.length > 0 && (
-                        <div className="mt-3 p-2 bg-muted/50 rounded text-xs text-muted-foreground">
-                          "{entity.snippets[0].text}"
-                        </div>
+            <ScrollArea className="flex-1 p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredEntities.map((entity) => {
+                  const type = getEntityType(entity.typeId)
+                  return (
+                    <Card
+                      key={entity.id}
+                      className={cn(
+                        "cursor-pointer hover:border-teal-300 transition-colors",
+                        selectedEntity?.id === entity.id && "border-teal-500",
                       )}
+                      onClick={() => setSelectedEntity(entity)}
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center", type?.color)}>
+                              {type?.icon}
+                            </div>
+                            <div>
+                              {editingEntityId === entity.id ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    value={editingEntityName}
+                                    onChange={(e) => setEditingEntityName(e.target.value)}
+                                    className="h-7 text-sm w-32"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleSaveEntity()
+                                      if (e.key === "Escape") setEditingEntityId(null)
+                                    }}
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleSaveEntity()
+                                    }}
+                                  >
+                                    <CheckSquare className="w-3 h-3 text-green-600" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <h3 className="font-medium text-foreground">{entity.name}</h3>
+                              )}
+                              <p className="text-xs text-muted-foreground">
+                                {entity.mentionCount} {isRTL ? "אזכורים" : "mentions"}
+                              </p>
+                            </div>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreHorizontal className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleEditEntity(entity)
+                                }}
+                              >
+                                <Pencil className="w-3 h-3 mr-2" />
+                                {isRTL ? "ערוך" : "Edit"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleOpenMerge(entity)
+                                }}
+                              >
+                                <GitMerge className="w-3 h-3 mr-2" />
+                                {isRTL ? "מזג" : "Merge"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteEntity(entity.id)
+                                }}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="w-3 h-3 mr-2" />
+                                {isRTL ? "מחק" : "Delete"}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
 
-                      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                        <Calendar className="w-3 h-3" />
-                        <span>{entity.lastMeeting}</span>
-                        <span>·</span>
-                        <span>
-                          {entity.meetingCount} {isRTL ? "פגישות" : "meetings"}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          </ScrollArea>
+                        {entity.snippets && entity.snippets.length > 0 && (
+                          <div className="mt-3 p-2 bg-muted/50 rounded text-xs text-muted-foreground">
+                            "{entity.snippets[0].text}"
+                          </div>
+                        )}
+
+                        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                          <Calendar className="w-3 h-3" />
+                          <span>{entity.lastMeeting}</span>
+                          <span>·</span>
+                          <span>
+                            {entity.meetingCount} {isRTL ? "פגישות" : "meetings"}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            </ScrollArea>
           )}
 
           {/* Detail Panel */}
