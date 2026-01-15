@@ -110,6 +110,7 @@ export async function GET(request: NextRequest) {
     // Step 6: Build co-mention edges from Postgres with WEIGHT tracking
     const edges: GraphEdge[] = [];
     const edgeWeights = new Map<string, number>(); // Track co-occurrence count
+    const seenEdges = new Set<string>(); // Track unique edges to prevent duplicates
     const filteredEntityIds = new Set(filteredEntities.map(e => e.id));
 
     // Group mentions by session
@@ -140,10 +141,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Only create edges for meaningful co-occurrences (2+ meetings)
-    // Also limit total edges to prevent visual overload
-    const MIN_COOCCURRENCE = 2;
-    const MAX_EDGES = 100;
+    // Show co-occurrences, limit total edges to prevent visual overload
+    const MIN_COOCCURRENCE = 1; // Show any co-occurrence
+    const MAX_EDGES = 80; // Limit for readability
 
     // Sort edges by weight (highest first) and filter
     const sortedEdges = Array.from(edgeWeights.entries())

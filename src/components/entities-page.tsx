@@ -391,11 +391,11 @@ function GraphView({
         const isActiveEdge = activeNodeId && (rel.sourceId === activeNodeId || rel.targetId === activeNodeId)
 
         if (!activeNodeId) {
-          // No selection - show very faint edges
+          // No selection - show edges at moderate opacity
           ctx.beginPath()
           ctx.moveTo(source.x, source.y)
           ctx.lineTo(target.x, target.y)
-          ctx.strokeStyle = "rgba(148, 163, 184, 0.15)" // Very faint
+          ctx.strokeStyle = "rgba(100, 116, 139, 0.4)" // Visible but not overwhelming
           ctx.lineWidth = 1
           ctx.stroke()
         } else if (isActiveEdge) {
