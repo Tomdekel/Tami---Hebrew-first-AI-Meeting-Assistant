@@ -230,6 +230,14 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([])
 
   useEffect(() => {
+    if (!selectedMeetingId || session !== null) return
+    // Deleted/not found meeting: clear selection and leave detail route.
+    isDeletingRef.current = true
+    setSelectedMeetingId(null)
+    router.replace("/meetings")
+  }, [session, selectedMeetingId, router])
+
+  useEffect(() => {
     // Skip auto-selection during delete to prevent race condition
     if (isDeletingRef.current) return
     if (!selectedMeetingId && sessions.length > 0) {
@@ -337,19 +345,25 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   // Sync local decisions with session
   useEffect(() => {
     const sessionDecisions = session?.summary?.decisions || session?.summary?.key_points || []
-    setLocalDecisions(
-      sessionDecisions.map((d: string | { id?: string; description: string }, index: number) =>
-        typeof d === "string"
-          ? { id: `legacy-${index}`, description: d }
-          : { id: d.id || `legacy-${index}`, description: d.description }
-      )
+    const nextDecisions = sessionDecisions.map((d: string | { id?: string; description: string }, index: number) =>
+      typeof d === "string"
+        ? { id: `legacy-${index}`, description: d }
+        : { id: d.id || `legacy-${index}`, description: d.description }
     )
+    setLocalDecisions((prev) => {
+      if (prev.length === nextDecisions.length && prev.every((item, idx) =>
+        item.id === nextDecisions[idx].id && item.description === nextDecisions[idx].description
+      )) {
+        return prev
+      }
+      return nextDecisions
+    })
   }, [session?.summary?.decisions, session?.summary?.key_points])
 
   // Sync completed tasks from actionItems
   useEffect(() => {
     if (!actionItemsData) {
-      setCompletedTasks(new Set())
+      setCompletedTasks((prev) => (prev.size === 0 ? prev : new Set()))
       return
     }
     const completed = new Set<string>()
@@ -358,7 +372,12 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
         completed.add(item.id)
       }
     })
-    setCompletedTasks(completed)
+    setCompletedTasks((prev) => {
+      if (prev.size === completed.size && [...prev].every((id) => completed.has(id))) {
+        return prev
+      }
+      return completed
+    })
   }, [actionItemsData])
 
   const getInitials = (name: string) => {
