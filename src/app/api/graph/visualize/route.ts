@@ -135,7 +135,8 @@ export async function GET(request: NextRequest) {
       for (let i = 0; i < sessionEntityIds.length; i++) {
         for (let j = i + 1; j < sessionEntityIds.length; j++) {
           const [sourceId, targetId] = [sessionEntityIds[i], sessionEntityIds[j]].sort();
-          const edgeKey = `${sourceId}-${targetId}`;
+          // Use ||| as separator since UUIDs contain hyphens
+          const edgeKey = `${sourceId}|||${targetId}`;
           edgeWeights.set(edgeKey, (edgeWeights.get(edgeKey) || 0) + 1);
         }
       }
@@ -152,12 +153,12 @@ export async function GET(request: NextRequest) {
       .slice(0, MAX_EDGES);
 
     for (const [edgeKey, weight] of sortedEdges) {
-      const [sourceId, targetId] = edgeKey.split('-');
+      const [sourceId, targetId] = edgeKey.split('|||');
       edges.push({
         source: sourceId,
         target: targetId,
         type: "MENTIONED_TOGETHER",
-        weight, // Include weight for frontend use
+        weight,
       });
     }
 
