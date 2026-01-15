@@ -52,11 +52,12 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const body = await request.json();
     const steps: ReprocessStep[] = body.steps || ["all"];
+    const languageOverride: "en" | "he" | "auto" | undefined = body.language;
 
     // Get session
     const { data: session, error: sessionError } = await supabase
       .from("sessions")
-      .select("id, user_id, audio_url, status")
+      .select("id, user_id, audio_url, status, processing_state")
       .eq("id", id)
       .single();
 
@@ -69,7 +70,14 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     // Idempotency check: prevent concurrent reprocess requests
-    if (session.status === "processing") {
+    // Allow reprocessing if processing_state is "draft" (processing never properly started)
+    // or if processing_state is "failed" (previous attempt failed)
+    const isActuallyProcessing =
+      session.status === "processing" &&
+      session.processing_state !== "draft" &&
+      session.processing_state !== "failed";
+
+    if (isActuallyProcessing) {
       return NextResponse.json(
         { error: "Session is already being processed. Please wait." },
         { status: 409 }
@@ -85,16 +93,28 @@ export async function POST(request: Request, { params }: RouteParams) {
         results.transcription = { success: false, error: "No audio file found" };
       } else {
         try {
+          // Prepare updates
+          const updates: Record<string, any> = {
+            status: "pending",
+            processing_state: "draft",
+            processing_steps: [],
+            current_step: null,
+            transcription_job_id: null,
+          };
+
+          // Handle language override
+          if (languageOverride) {
+            if (languageOverride === "auto") {
+              updates.detected_language = null; // Force re-detection
+            } else {
+              updates.detected_language = languageOverride;
+            }
+          }
+
           // Reset status and processing state for fresh start
           await supabase
             .from("sessions")
-            .update({
-              status: "pending",
-              processing_state: "draft",
-              processing_steps: [],
-              current_step: null,
-              transcription_job_id: null,
-            })
+            .update(updates)
             .eq("id", id);
 
           // Delete all related data for clean reprocess
@@ -247,8 +267,8 @@ export async function POST(request: Request, { params }: RouteParams) {
       message: allSuccessful
         ? "All reprocessing steps completed successfully"
         : anySuccessful
-        ? "Some reprocessing steps completed"
-        : "Reprocessing failed",
+          ? "Some reprocessing steps completed"
+          : "Reprocessing failed",
     });
   } catch (error) {
     console.error("Reprocess error:", error);

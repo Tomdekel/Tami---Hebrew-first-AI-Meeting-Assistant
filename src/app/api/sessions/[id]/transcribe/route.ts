@@ -103,7 +103,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // Fetch audio sample for detection
         const headResponse = await fetch(session.audio_url, { method: "HEAD" });
         const contentLength = parseInt(headResponse.headers.get("content-length") || "0", 10);
-        const sampleSize = Math.min(contentLength, 160000);
+        // Increase sample size to ~500KB (approx 30-40s at 128kbps) for better detection
+        const sampleSize = Math.min(contentLength, 500 * 1024);
 
         const audioResponse = await fetch(session.audio_url, {
           headers: sampleSize < contentLength ? { Range: `bytes=0-${sampleSize - 1}` } : {},

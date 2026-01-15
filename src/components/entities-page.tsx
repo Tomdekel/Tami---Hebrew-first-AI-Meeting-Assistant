@@ -233,6 +233,20 @@ export function EntitiesPage() {
     return t ? t.color : "bg-gray-100 text-gray-700" // Fallback
   }
 
+  const handleEntityUpdated = (updatedEntity: Entity) => {
+    setEntities(prev => prev.map(e => e.id === updatedEntity.id ? updatedEntity : e))
+    if (selectedEntity?.id === updatedEntity.id) {
+      setSelectedEntity(updatedEntity)
+    }
+  }
+
+  const handleEntityDeleted = (id: string) => {
+    setEntities(prev => prev.filter(e => e.id !== id))
+    if (selectedEntity?.id === id) {
+      setSelectedEntity(null)
+    }
+  }
+
   return (
     <div className={`container mx-auto p-6 space-y-6 ${isRTL ? "font-hebrew" : ""}`} dir={isRTL ? "rtl" : "ltr"}>
       {/* Page Header */}
@@ -296,6 +310,8 @@ export function EntitiesPage() {
         isOpen={!!selectedEntity}
         onClose={() => setSelectedEntity(null)}
         getTypeColor={getTypeColor}
+        onEntityUpdated={handleEntityUpdated}
+        onEntityDeleted={handleEntityDeleted}
       />
     </div>
   )

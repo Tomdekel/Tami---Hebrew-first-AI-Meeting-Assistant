@@ -16,7 +16,7 @@ interface Meeting {
   time: string
   duration: string
   participants: string[]
-  status: "completed" | "processing" | "draft" | "failed"
+  status: "completed" | "processing" | "pending" | "draft" | "failed"
   currentStep?: ProcessingStepKey
   context?: string
   source?: string

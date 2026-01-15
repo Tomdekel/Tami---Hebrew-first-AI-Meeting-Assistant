@@ -177,15 +177,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       const uniqueSpeakers = new Set(result.segments.map((seg) => seg.speaker)).size;
 
       // Mark session as completed IMMEDIATELY
-      await supabase
+      // Also update processing_state to prevent showing draft banner while enhancements run
+      const { error: statusUpdateError } = await supabase
         .from("sessions")
         .update({
           status: "completed",
+          processing_state: "processing", // Will be set to "completed" by enhancement pipeline
           duration_seconds: result.duration,
           transcription_job_id: null,
           participant_count: uniqueSpeakers,
         })
         .eq("id", sessionId);
+
+      if (statusUpdateError) {
+        console.error("[transcription-status] Failed to update session status:", {
+          sessionId,
+          error: statusUpdateError.message,
+          code: statusUpdateError.code,
+        });
+        // Continue anyway - transcript is saved and enhancements will run
+      }
 
       // Run enhancement pipeline (optional - can fail gracefully)
       const state = initializePipelineState(

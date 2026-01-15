@@ -53,10 +53,10 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { useToast } from "@/hooks/use-toast"
 import { updateSession, deleteSession, startTranscription } from "@/hooks/use-session"
-import { useActionItemsQuery, useInvalidateSessions, useSessionQuery, useSessionsQuery, useSpeakersQuery, useTranscriptionStatusPolling } from "@/hooks/use-session-query"
+import { useActionItemsQuery, useInvalidateSessions, useSessionQuery, useSessionTranscriptQuery, useSessionsQuery, useSpeakersQuery, useTranscriptionStatusPolling } from "@/hooks/use-session-query"
 import { cn } from "@/lib/utils"
 import { getSpeakerColor } from "@/lib/speaker-colors"
-import type { Session, TranscriptSegment } from "@/lib/types/database"
+import type { Session, SessionWithRelations, TranscriptSegment } from "@/lib/types/database"
 
 interface MeetingsPageProps {
   initialMeetingId?: string | null
@@ -69,7 +69,7 @@ interface MeetingListItem {
   time: string
   duration: string
   participants: string[]
-  status: "completed" | "processing" | "draft" | "failed"
+  status: "completed" | "processing" | "pending" | "draft" | "failed"
   currentStep?: ProcessingStepKey
   context?: string
   source?: string
@@ -223,7 +223,18 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
 
   const searchParams = useSearchParams()
 
-  const { data: session, isPending: isLoadingSessionDetail } = useSessionQuery(selectedMeetingId)
+  const { data: sessionData, isPending: isLoadingSessionDetail } = useSessionQuery(selectedMeetingId, false)
+  const { data: transcriptData } = useSessionTranscriptQuery(selectedMeetingId)
+
+  // Merge session data with transcript
+  const session = useMemo(() => {
+    if (!sessionData) return null
+    return {
+      ...sessionData,
+      transcript: transcriptData ? transcriptData : undefined
+    } as SessionWithRelations
+  }, [sessionData, transcriptData])
+
   // Poll for transcription status updates when session is processing
   useTranscriptionStatusPolling(session)
   const { data: speakersData = [] } = useSpeakersQuery(selectedMeetingId)
@@ -1323,8 +1334,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                           <div
                             key={task.id}
                             className={cn(
-                              "p-3 rounded-lg border transition-colors group border-l-4",
-                              completedTasks.has(task.id) ? "bg-muted/30 border-muted border-l-muted-foreground/30" : "bg-white border-border border-l-blue-400",
+                              "group flex items-center gap-3 text-sm p-2 rounded hover:bg-muted/50 transition-colors cursor-pointer",
                             )}
                           >
                             {editingTaskId === task.id && editingTask ? (
@@ -1860,6 +1870,6 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div >
   )
 }

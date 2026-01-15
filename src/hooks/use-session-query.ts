@@ -24,14 +24,14 @@ export const sessionKeys = {
 }
 
 // Fetch single session with full relations (transcript, summary, tags)
-export function useSessionQuery(sessionId: string | null) {
+export function useSessionQuery(sessionId: string | null, includeTranscript = false) {
   return useQuery<SessionWithRelations | null>({
-    queryKey: sessionKeys.detail(sessionId ?? ""),
+    queryKey: [...sessionKeys.detail(sessionId ?? ""), { includeTranscript }],
     queryFn: async (): Promise<SessionWithRelations | null> => {
       if (!isValidUUID(sessionId)) {
         throw new Error("Invalid session ID format")
       }
-      const res = await fetch(`/api/sessions/${sessionId}`)
+      const res = await fetch(`/api/sessions/${sessionId}?include_transcript=${includeTranscript}`)
       if (!res.ok) {
         if (res.status === 404) return null
         const data = await res.json().catch(() => ({}))
@@ -42,6 +42,27 @@ export function useSessionQuery(sessionId: string | null) {
     },
     enabled: isValidUUID(sessionId),
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
+}
+
+// Separate hook for fetching just the transcript (heavier payload)
+export function useSessionTranscriptQuery(sessionId: string | null) {
+  return useQuery<SessionWithRelations["transcript"] | null>({
+    queryKey: [...sessionKeys.detail(sessionId ?? ""), "transcript"],
+    queryFn: async (): Promise<SessionWithRelations["transcript"] | null> => {
+      if (!isValidUUID(sessionId)) return null
+
+      const res = await fetch(`/api/sessions/${sessionId}?include_transcript=true`)
+      if (!res.ok) {
+        if (res.status === 404) return null
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to fetch transcript")
+      }
+      const data = await res.json()
+      return data.session?.transcript || null
+    },
+    enabled: isValidUUID(sessionId),
+    staleTime: 5 * 60 * 1000,
   })
 }
 

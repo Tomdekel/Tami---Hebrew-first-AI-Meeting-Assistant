@@ -36,15 +36,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: sessionError.message }, { status: 500 });
   }
 
-  // Get transcript with segments
-  const { data: transcript } = await supabase
-    .from("transcripts")
-    .select(`
-      *,
-      segments:transcript_segments(*)
-    `)
-    .eq("session_id", id)
-    .single();
+  // Get query params
+  const sessionUrl = new URL(request.url);
+  const includeTranscript = sessionUrl.searchParams.get("include_transcript") !== "false";
+
+  // Get transcript with segments (only if requested)
+  let transcript = null;
+
+  if (includeTranscript) {
+    const { data: fetchedTranscript } = await supabase
+      .from("transcripts")
+      .select(`
+        *,
+        segments:transcript_segments(*)
+      `)
+      .eq("session_id", id)
+      .single();
+    transcript = fetchedTranscript;
+  }
 
   // Get summary with action items
   const { data: summary } = await supabase

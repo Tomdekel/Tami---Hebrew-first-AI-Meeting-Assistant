@@ -129,6 +129,10 @@ export function NewMeetingPage() {
   const [shortMeetingDuration, setShortMeetingDuration] = useState(0)
   const [pendingShortMeetingAction, setPendingShortMeetingAction] = useState<(() => Promise<void>) | null>(null)
 
+  // Navigation warning during recording
+  const [showNavigationWarning, setShowNavigationWarning] = useState(false)
+  const pendingNavigationActionRef = useRef<(() => void) | null>(null)
+
   const [selectedIntegration, setSelectedIntegration] = useState<IntegrationProvider | null>(null)
   const [integrationMode, setIntegrationMode] = useState<IntegrationMode>("manual")
   const [integrationEvents, setIntegrationEvents] = useState<CalendarEvent[]>([])
@@ -539,6 +543,50 @@ export function NewMeetingPage() {
       void handleRecordingComplete(inPersonAudioBlob, false, recordingDuration)
     }
   }, [inPersonAudioBlob, recordingState, handleRecordingComplete, recordingMode, recordingDuration])
+
+  // Navigation warning during active recording
+  const isActiveRecording = recordingState === "recording" || recordingState === "paused"
+
+  useEffect(() => {
+    if (!isActiveRecording) return
+
+    // Handle browser back/forward/refresh/close - show native "Leave site?" dialog
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      // Modern browsers require returnValue to be set
+      e.returnValue = ""
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [isActiveRecording])
+
+  // Handler for confirming navigation during recording
+  const handleConfirmNavigation = useCallback(() => {
+    stopInPersonRecording()
+    setShowNavigationWarning(false)
+    // Execute pending navigation after a short delay to let recording save
+    setTimeout(() => {
+      if (pendingNavigationActionRef.current) {
+        pendingNavigationActionRef.current()
+        pendingNavigationActionRef.current = null
+      }
+    }, 100)
+  }, [stopInPersonRecording])
+
+  // Handler for intercepting navigation attempts during recording
+  const handleNavigationAttempt = useCallback((action: () => void) => {
+    if (isActiveRecording) {
+      pendingNavigationActionRef.current = action
+      setShowNavigationWarning(true)
+      return true // Navigation blocked
+    }
+    action()
+    return false // Navigation allowed
+  }, [isActiveRecording])
 
   const handleStartInPerson = useCallback(async () => {
     if (!meetingTitle.trim()) {
@@ -1108,8 +1156,10 @@ export function NewMeetingPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          setRecordingMode(null)
-                          setAudioMode(null)
+                          handleNavigationAttempt(() => {
+                            setRecordingMode(null)
+                            setAudioMode(null)
+                          })
                         }}
                       >
                         <ArrowLeft className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2")} />
@@ -1383,6 +1433,32 @@ export function NewMeetingPage() {
               }}
             >
               {isRTL ? "המשך" : "Continue"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Navigation warning during recording */}
+      <AlertDialog open={showNavigationWarning} onOpenChange={setShowNavigationWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isRTL ? "עצור הקלטה?" : "Stop Recording?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isRTL
+                ? "יציאה מהדף תפסיק את ההקלטה. ההקלטה הנוכחית תישמר."
+                : "Leaving this page will stop the recording. Your current recording will be saved."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              pendingNavigationActionRef.current = null
+            }}>
+              {isRTL ? "המשך הקלטה" : "Continue Recording"}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmNavigation}>
+              {isRTL ? "עצור ושמור" : "Stop & Save"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

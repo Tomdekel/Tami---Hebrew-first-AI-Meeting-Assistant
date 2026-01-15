@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import {
     Sheet,
     SheetContent,
@@ -10,7 +11,19 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Calendar, FileText, CheckSquare, Link2, ExternalLink } from "lucide-react"
+import { Calendar, FileText, CheckSquare, Link2, ExternalLink, Pencil, Trash2, Check, X, Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import Link from "next/link"
 import { useLanguage } from "@/contexts/language-context"
 import type { Entity, EntityType } from "@/types/entity"
@@ -20,12 +33,92 @@ interface EntitySheetProps {
     isOpen: boolean
     onClose: () => void
     getTypeColor: (typeId: string) => string
+    onEntityUpdated?: (entity: Entity) => void
+    onEntityDeleted?: (id: string) => void
 }
 
-export function EntitySheet({ entity, isOpen, onClose, getTypeColor }: EntitySheetProps) {
+export function EntitySheet({
+    entity,
+    isOpen,
+    onClose,
+    getTypeColor,
+    onEntityUpdated,
+    onEntityDeleted
+}: EntitySheetProps) {
     const { isRTL } = useLanguage()
 
+    // Edit Mode State
+    const [isEditing, setIsEditing] = useState(false)
+    const [editName, setEditName] = useState("")
+    const [isSaving, setIsSaving] = useState(false)
+
+    // Delete State
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [isDeleting, setIsDeleting] = useState(false)
+
+    // Reset state when entity changes
+    useEffect(() => {
+        if (entity) {
+            setEditName(entity.name)
+            setIsEditing(false)
+            setShowDeleteConfirm(false)
+        }
+    }, [entity])
+
     if (!entity) return null
+
+    // Handlers
+    const handleSave = async () => {
+        if (!editName.trim() || editName === entity.name) {
+            setIsEditing(false)
+            return
+        }
+
+        try {
+            setIsSaving(true)
+            const res = await fetch(`/api/entities/${entity.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: editName })
+            })
+
+            if (!res.ok) throw new Error("Failed to update")
+
+            const data = await res.json()
+            if (data.entity && onEntityUpdated) {
+                // Merge the updated fields into the current entity for optimistic feel
+                // (though api returns full entity usually)
+                onEntityUpdated({ ...entity, name: data.entity.value })
+            }
+            setIsEditing(false)
+        } catch (error) {
+            console.error(error)
+            // Could show toast error here
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const handleDelete = async () => {
+        try {
+            setIsDeleting(true)
+            const res = await fetch(`/api/entities/${entity.id}`, {
+                method: "DELETE"
+            })
+
+            if (!res.ok) throw new Error("Failed to delete")
+
+            if (onEntityDeleted) {
+                onEntityDeleted(entity.id)
+            }
+            onClose()
+        } catch (error) {
+            console.error(error)
+        } finally {
+            setIsDeleting(false)
+            setShowDeleteConfirm(false)
+        }
+    }
 
     // Sort meetings by date descending
     const sortedMeetings = [...entity.meetings].sort((a, b) =>
@@ -36,17 +129,59 @@ export function EntitySheet({ entity, isOpen, onClose, getTypeColor }: EntityShe
         <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <SheetContent className="sm:max-w-xl w-full overflow-y-auto" side={isRTL ? "left" : "right"}>
                 <SheetHeader className="mb-6">
-                    <div className="flex items-center gap-2 mb-2">
-                        <Badge variant="outline" className={`${getTypeColor(entity.typeId)}`}>
-                            {entity.typeId}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                            ID: {entity.id.slice(0, 8)}
-                        </span>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={`${getTypeColor(entity.typeId)}`}>
+                                {entity.typeId}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                                ID: {entity.id.slice(0, 8)}
+                            </span>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1">
+                            {!isEditing ? (
+                                <>
+                                    <Button variant="ghost" size="icon" onClick={() => setIsEditing(true)}>
+                                        <Pencil className="w-4 h-4 text-muted-foreground" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => setShowDeleteConfirm(true)}>
+                                        <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
+                                    </Button>
+                                </>
+                            ) : (
+                                // Editing Actions are inline with Input usually, but can be here too? 
+                                // No, better next to input if possible, but header is fine.
+                                null
+                            )}
+                        </div>
                     </div>
-                    <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-                        {entity.name}
-                    </SheetTitle>
+
+                    {/* Title Area */}
+                    <div className="flex items-center gap-2 min-h-[40px]">
+                        {isEditing ? (
+                            <div className="flex items-center gap-2 w-full">
+                                <Input
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    className="text-lg font-bold h-10"
+                                    autoFocus
+                                />
+                                <Button size="icon" variant="default" onClick={handleSave} disabled={isSaving}>
+                                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                </Button>
+                                <Button size="icon" variant="ghost" onClick={() => setIsEditing(false)} disabled={isSaving}>
+                                    <X className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        ) : (
+                            <SheetTitle className="text-2xl font-bold flex items-center gap-2 break-all">
+                                {entity.name}
+                            </SheetTitle>
+                        )}
+                    </div>
+
                     <SheetDescription>
                         {isRTL
                             ? `נראה ${entity.mentionCount} פעמים לאורך ${entity.meetingCount} פגישות.`
@@ -137,6 +272,29 @@ export function EntitySheet({ entity, isOpen, onClose, getTypeColor }: EntityShe
                     </TabsContent>
                 </Tabs>
             </SheetContent>
+
+            <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{isRTL ? "למחוק את הישות?" : "Delete this entity?"}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {isRTL
+                                ? "פעולה זו לא ניתנת לביטול. הישות תימחק מהגרף ומאגר הידע (הפגישות עצמן יישארו)."
+                                : "This action cannot be undone. The entity will be removed from the graph and knowledge base (meetings will remain)."}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{isRTL ? "ביטול" : "Cancel"}</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+                            {isDeleting
+                                ? (isRTL ? "מוחק..." : "Deleting...")
+                                : (isRTL ? "מחק" : "Delete")
+                            }
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
         </Sheet>
     )
 }

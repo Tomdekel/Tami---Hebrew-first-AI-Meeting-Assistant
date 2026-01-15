@@ -267,7 +267,8 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 export async function startTranscription(sessionId: string): Promise<void> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  // 5 minute timeout - long recordings need time for upload validation and language detection
+  const timeoutId = setTimeout(() => controller.abort(), 300000);
 
   try {
     const response = await fetch(`/api/sessions/${sessionId}/transcribe`, {

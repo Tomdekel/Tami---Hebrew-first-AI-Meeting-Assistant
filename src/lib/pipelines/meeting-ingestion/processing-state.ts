@@ -83,12 +83,25 @@ export async function initializeProcessingSteps(
   supabase: SupabaseClient,
   sessionId: string
 ) {
-  await supabase
+  const { data, error } = await supabase
     .from("sessions")
     .update({
       processing_steps: getDefaultProcessingSteps(),
       processing_state: "processing",
       current_step: "source_received",
     })
-    .eq("id", sessionId);
+    .eq("id", sessionId)
+    .select("id");
+
+  if (error) {
+    console.error("[processing-state] Failed to initialize processing steps:", error);
+    throw new Error(`Failed to initialize processing: ${error.message}`);
+  }
+
+  if (!data || data.length === 0) {
+    console.error("[processing-state] No session found to update:", sessionId);
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  console.log(`[processing-state] Initialized processing for session ${sessionId}`);
 }

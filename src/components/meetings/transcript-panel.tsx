@@ -8,6 +8,7 @@ import { Pencil, Check, X, Search, ChevronUp, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/contexts/language-context"
 import { getSpeakerColor } from "@/lib/speaker-colors"
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 
 interface TranscriptItem {
   id: string
@@ -41,8 +42,7 @@ export function TranscriptPanel({
   const [searchQuery, setSearchQuery] = useState("")
   const [currentResultIndex, setCurrentResultIndex] = useState(0)
   const suggestionsId = "speaker-name-suggestions"
-  const resultRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   const handleStartEdit = (speakerId: string, segmentId: string, currentName: string) => {
     setEditingSpeakerId(speakerId)
@@ -94,11 +94,13 @@ export function TranscriptPanel({
     if (filteredTranscript.length === 0) return
     const item = filteredTranscript[index]
     if (!item) return
-    const element = resultRefs.current.get(item.id)
-    if (element && scrollContainerRef.current) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+    // Find index in original transcript if filtering
+    const originalIndex = transcript.findIndex(t => t.id === item.id)
+    if (originalIndex !== -1 && virtuosoRef.current) {
+      virtuosoRef.current.scrollToIndex({ index: originalIndex, align: "center", behavior: "smooth" })
     }
-  }, [filteredTranscript])
+  }, [filteredTranscript, transcript])
 
   // Navigate to next/prev result
   const goToNextResult = useCallback(() => {
@@ -147,6 +149,17 @@ export function TranscriptPanel({
       ),
     )
   }
+
+  // Scroll to highlighted segment from props
+  useEffect(() => {
+    if (highlightedSegmentId && virtuosoRef.current) {
+      const index = transcript.findIndex(t => t.id === highlightedSegmentId)
+      if (index !== -1) {
+        virtuosoRef.current.scrollToIndex({ index, align: "center", behavior: "smooth" })
+      }
+    }
+  }, [highlightedSegmentId, transcript])
+
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -215,85 +228,95 @@ export function TranscriptPanel({
         )}
       </div>
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {filteredTranscript.map((item, index) => (
-          <div
-            key={item.id}
-            ref={(el) => {
-              if (el) resultRefs.current.set(item.id, el)
-            }}
-            className={cn(
-              "flex gap-3 p-3 rounded-lg transition-colors",
-              highlightedSegmentId === item.id || highlightedTime === item.time
-                ? "bg-teal-50"
-                : searchQuery && index === currentResultIndex
-                  ? "bg-yellow-50 ring-2 ring-yellow-300"
-                  : "hover:bg-muted/50",
-            )}
-          >
-            {(() => {
-              const color = getSpeakerColor(item.speakerId)
-              return (
-                <Avatar className={cn("h-8 w-8 flex-shrink-0 text-xs", color.bg, color.text)}>
-                  <AvatarFallback className={cn("text-xs font-medium", color.bg, color.text)}>
-                    {getInitials(item.speaker)}
-                  </AvatarFallback>
-                </Avatar>
-              )
-            })()}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                {editingSegmentId === item.id ? (
-                  <div className="flex items-center gap-1">
-                    <Input
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      className="h-5 w-24 text-xs"
-                      autoFocus
-                      list={nameSuggestions.length ? suggestionsId : undefined}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          handleSaveEdit()
-                        }
-                        if (e.key === "Escape") handleCancelEdit()
-                      }}
-                    />
-                    {nameSuggestions.length > 0 && (
-                      <datalist id={suggestionsId}>
-                        {nameSuggestions.map((suggestion) => (
-                          <option key={suggestion} value={suggestion} />
-                        ))}
-                      </datalist>
-                    )}
-                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleSaveEdit}>
-                      <Check className="w-3 h-3 text-green-600" />
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleCancelEdit}>
-                      <X className="w-3 h-3 text-red-600" />
-                    </Button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => handleStartEdit(item.speakerId, item.id, item.speaker)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-teal-600 group"
-                  >
-                    {item.speaker}
-                    <Pencil className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </button>
+      <div className="flex-1 p-4">
+        <Virtuoso
+          ref={virtuosoRef}
+          data={transcript} // Always use full transcript, Virtuoso handles rendering
+          totalCount={transcript.length}
+          itemContent={(index, item) => {
+            // If searching, check if this item matches to highlight background
+            const isMatch = searchQuery && (
+              item.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              item.speaker.toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            const isCurrentResult = isMatch && filteredTranscript[currentResultIndex]?.id === item.id
+
+            return (
+              <div
+                className={cn(
+                  "flex gap-3 p-3 rounded-lg transition-colors mb-2", // mb-2 for spacing
+                  highlightedSegmentId === item.id || highlightedTime === item.time
+                    ? "bg-teal-50"
+                    : isCurrentResult
+                      ? "bg-yellow-50 ring-2 ring-yellow-300"
+                      : "hover:bg-muted/50",
                 )}
-                <button
-                  onClick={() => setHighlightedTime(item.time)}
-                  className="text-xs text-muted-foreground hover:text-teal-600 font-mono"
-                  dir="ltr"
-                >
-                  {item.time}
-                </button>
+              >
+                {(() => {
+                  const color = getSpeakerColor(item.speakerId)
+                  return (
+                    <Avatar className={cn("h-8 w-8 flex-shrink-0 text-xs", color.bg, color.text)}>
+                      <AvatarFallback className={cn("text-xs font-medium", color.bg, color.text)}>
+                        {getInitials(item.speaker)}
+                      </AvatarFallback>
+                    </Avatar>
+                  )
+                })()}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    {editingSegmentId === item.id ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          className="h-5 w-24 text-xs"
+                          autoFocus
+                          list={nameSuggestions.length ? suggestionsId : undefined}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              handleSaveEdit()
+                            }
+                            if (e.key === "Escape") handleCancelEdit()
+                          }}
+                        />
+                        {nameSuggestions.length > 0 && (
+                          <datalist id={suggestionsId}>
+                            {nameSuggestions.map((suggestion) => (
+                              <option key={suggestion} value={suggestion} />
+                            ))}
+                          </datalist>
+                        )}
+                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleSaveEdit}>
+                          <Check className="w-3 h-3 text-green-600" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleCancelEdit}>
+                          <X className="w-3 h-3 text-red-600" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleStartEdit(item.speakerId, item.id, item.speaker)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-teal-600 group"
+                      >
+                        {item.speaker}
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setHighlightedTime(item.time)}
+                      className="text-xs text-muted-foreground hover:text-teal-600 font-mono"
+                      dir="ltr"
+                    >
+                      {item.time}
+                    </button>
+                  </div>
+                  <p className="text-sm text-foreground leading-relaxed">{highlightText(item.text, searchQuery)}</p>
+                </div>
               </div>
-              <p className="text-sm text-foreground leading-relaxed">{highlightText(item.text, searchQuery)}</p>
-            </div>
-          </div>
-        ))}
+            )
+          }}
+        />
       </div>
     </div>
   )
