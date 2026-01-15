@@ -288,161 +288,78 @@ function GraphView({
   // Filter entities by type
   const filteredEntities = filterTypes.length > 0 ? entities.filter((e) => filterTypes.includes(e.typeId)) : entities
 
-  // Initialize nodes spread across the canvas
+  // RADIAL LAYOUT - Deterministic, no physics, always readable
+  // Groups entities by type and places them in wedges around center
   useEffect(() => {
     const centerX = canvasSize.width / 2
     const centerY = canvasSize.height / 2
-    const nodeCount = filteredEntities.length
+    const padding = 60 // Padding from edges
+    const baseRadius = Math.min(canvasSize.width, canvasSize.height) / 2 - padding
 
-    // Calculate grid-like initial positions for better spread
-    const cols = Math.ceil(Math.sqrt(nodeCount * (canvasSize.width / canvasSize.height)))
-    const rows = Math.ceil(nodeCount / cols)
-    const spacingX = canvasSize.width / (cols + 1)
-    const spacingY = canvasSize.height / (rows + 1)
-
-    const initialNodes: GraphNode[] = filteredEntities.map((entity, i) => {
-      const col = i % cols
-      const row = Math.floor(i / cols)
-      // Grid position with some randomness to avoid perfect alignment
-      const x = spacingX * (col + 1) + (Math.random() - 0.5) * spacingX * 0.5
-      const y = spacingY * (row + 1) + (Math.random() - 0.5) * spacingY * 0.5
-
-      return {
-        id: entity.id,
-        x,
-        y,
-        vx: 0,
-        vy: 0,
-        entity,
-        type: entityTypes.find((t) => t.id === entity.typeId) || entityTypes[0],
+    // Group entities by type
+    const entitiesByType = new Map<string, Entity[]>()
+    for (const entity of filteredEntities) {
+      const typeId = entity.typeId
+      if (!entitiesByType.has(typeId)) {
+        entitiesByType.set(typeId, [])
       }
-    })
-    setNodes(initialNodes)
-  }, [filteredEntities, entityTypes, canvasSize])
+      entitiesByType.get(typeId)!.push(entity)
+    }
 
-  // Force simulation with alpha decay (simulation cools down and stops)
-  const alphaRef = useRef(1) // Simulation energy - decays over time
-  const alphaDecay = 0.01 // Slower decay - gives time to spread out
-  const alphaMin = 0.001 // When to stop simulation completely
+    // Calculate positions
+    const typeIds = Array.from(entitiesByType.keys())
+    const totalTypes = typeIds.length || 1
+    const anglePerType = (2 * Math.PI) / totalTypes
 
-  useEffect(() => {
-    // Reset alpha when nodes change (restart simulation)
-    alphaRef.current = 1
-  }, [filteredEntities])
+    const newNodes: GraphNode[] = []
+    let typeIndex = 0
 
-  useEffect(() => {
-    const simulate = () => {
-      // If simulation has cooled down, stop animating
-      if (alphaRef.current < alphaMin) {
-        return
-      }
+    for (const [typeId, typeEntities] of entitiesByType) {
+      const startAngle = typeIndex * anglePerType - Math.PI / 2 // Start from top
+      const entityCount = typeEntities.length
 
-      // Decay alpha each frame (simulation cools down)
-      alphaRef.current *= (1 - alphaDecay)
+      // Sort entities by mention count (most mentioned = closer to center)
+      typeEntities.sort((a, b) => b.mentionCount - a.mentionCount)
 
-      setNodes((prevNodes) => {
-        const newNodes = prevNodes.map((node) => ({ ...node }))
-        const alpha = alphaRef.current // Current simulation energy
+      typeEntities.forEach((entity, i) => {
+        // Multiple rings if many entities of same type
+        const ring = Math.floor(i / 8) // 8 entities per ring
+        const posInRing = i % 8
+        const entitiesInThisRing = Math.min(8, entityCount - ring * 8)
 
-        // Minimum distance between nodes (prevents overlap)
-        const minDistance = 80
+        // Radius: inner rings for high-mention entities
+        const minRadius = baseRadius * 0.3
+        const maxRadius = baseRadius * 0.9
+        const radius = minRadius + (ring * (maxRadius - minRadius) / Math.max(1, Math.ceil(entityCount / 8)))
 
-        // Apply forces (scaled by alpha so they weaken as simulation cools)
-        for (let i = 0; i < newNodes.length; i++) {
-          const node = newNodes[i]
+        // Angle within the type's wedge
+        const angleSpread = anglePerType * 0.8 // Use 80% of wedge
+        const angleStart = startAngle + anglePerType * 0.1 // 10% padding
+        const angleStep = entitiesInThisRing > 1 ? angleSpread / (entitiesInThisRing - 1) : 0
+        const angle = angleStart + posInRing * angleStep
 
-          // Repulsion from other nodes - STRONG to spread them out
-          for (let j = 0; j < newNodes.length; j++) {
-            if (i === j) continue
-            const other = newNodes[j]
-            const dx = node.x - other.x
-            const dy = node.y - other.y
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const x = centerX + Math.cos(angle) * radius
+        const y = centerY + Math.sin(angle) * radius
 
-            // Strong repulsion when too close, weaker at distance
-            if (dist < minDistance * 3) {
-              // Collision avoidance - very strong when overlapping
-              const force = (3000 / (dist * dist)) * alpha
-              node.vx += (dx / dist) * force
-              node.vy += (dy / dist) * force
-            }
-
-            // Hard separation - push apart if within minimum distance
-            if (dist < minDistance) {
-              const overlap = minDistance - dist
-              node.vx += (dx / dist) * overlap * 0.5
-              node.vy += (dy / dist) * overlap * 0.5
-            }
-          }
-
-          // Attraction along edges - WEAK to prevent clustering
-          const nodeRelationships = relationships.filter((r) => r.sourceId === node.id || r.targetId === node.id)
-          for (const rel of nodeRelationships) {
-            const otherId = rel.sourceId === node.id ? rel.targetId : rel.sourceId
-            const other = newNodes.find((n) => n.id === otherId)
-            if (other) {
-              const dx = other.x - node.x
-              const dy = other.y - node.y
-              const dist = Math.sqrt(dx * dx + dy * dy) || 1
-              // Only attract if nodes are far apart (>200px)
-              if (dist > 200) {
-                const force = (dist - 200) * 0.002 * alpha
-                node.vx += (dx / dist) * force
-                node.vy += (dy / dist) * force
-              }
-            }
-          }
-
-          // Very weak center gravity (just to keep graph on screen)
-          const centerX = canvasSize.width / 2
-          const centerY = canvasSize.height / 2
-          node.vx += (centerX - node.x) * 0.0001 * alpha
-          node.vy += (centerY - node.y) * 0.0001 * alpha
-
-          // Moderate damping (0.8 = lose 20% velocity per frame)
-          node.vx *= 0.8
-          node.vy *= 0.8
-
-          // Higher velocity cap to allow spreading
-          const maxVelocity = 6
-          const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy)
-          if (speed > maxVelocity) {
-            node.vx = (node.vx / speed) * maxVelocity
-            node.vy = (node.vy / speed) * maxVelocity
-          }
-
-          // Stop slow nodes (higher threshold)
-          if (Math.abs(node.vx) < 0.3) node.vx = 0
-          if (Math.abs(node.vy) < 0.3) node.vy = 0
-
-          // Apply velocity
-          if (!dragNode || dragNode.id !== node.id) {
-            node.x += node.vx
-            node.y += node.vy
-          }
-        }
-
-        return newNodes
+        newNodes.push({
+          id: entity.id,
+          x,
+          y,
+          vx: 0,
+          vy: 0,
+          entity,
+          type: entityTypes.find((t) => t.id === typeId) || entityTypes[0],
+        })
       })
 
-      // Only continue animation if simulation is still active
-      if (alphaRef.current >= alphaMin) {
-        animationRef.current = requestAnimationFrame(simulate)
-      }
+      typeIndex++
     }
 
-    // Reheat simulation when dragging (so graph settles after drag)
-    if (dragNode) {
-      alphaRef.current = Math.max(alphaRef.current, 0.3)
-    }
+    setNodes(newNodes)
+  }, [filteredEntities, entityTypes, canvasSize])
 
-    animationRef.current = requestAnimationFrame(simulate)
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-    }
-  }, [relationships, dragNode, canvasSize])
+  // No physics simulation - dragging just moves nodes directly
+  // (Removed force simulation entirely)
 
   // Draw canvas
   useEffect(() => {
@@ -462,37 +379,47 @@ function GraphView({
       ctx.translate(offset.x, offset.y)
       ctx.scale(zoom, zoom)
 
-      // Draw edges with semantic colors
+      // Draw edges - ONLY for selected/hovered node to reduce clutter
+      const activeNodeId = selectedEntityId || hoveredNode?.id
+
       for (const rel of relationships) {
         const source = nodes.find((n) => n.id === rel.sourceId)
         const target = nodes.find((n) => n.id === rel.targetId)
-        if (source && target) {
-          // Get color based on relationship type
-          const edgeColor = relationshipColors[rel.type] || "#94A3B8"
+        if (!source || !target) continue
 
+        // Only show edges connected to active node, or show all very faintly
+        const isActiveEdge = activeNodeId && (rel.sourceId === activeNodeId || rel.targetId === activeNodeId)
+
+        if (!activeNodeId) {
+          // No selection - show very faint edges
           ctx.beginPath()
           ctx.moveTo(source.x, source.y)
           ctx.lineTo(target.x, target.y)
+          ctx.strokeStyle = "rgba(148, 163, 184, 0.15)" // Very faint
+          ctx.lineWidth = 1
+          ctx.stroke()
+        } else if (isActiveEdge) {
+          // Active edge - draw curved line with color
+          const edgeColor = relationshipColors[rel.type] || "#64748B"
+
+          // Curved edge (quadratic bezier)
+          const midX = (source.x + target.x) / 2
+          const midY = (source.y + target.y) / 2
+          const dx = target.x - source.x
+          const dy = target.y - source.y
+          // Curve control point perpendicular to line
+          const curvature = 0.2
+          const ctrlX = midX - dy * curvature
+          const ctrlY = midY + dx * curvature
+
+          ctx.beginPath()
+          ctx.moveTo(source.x, source.y)
+          ctx.quadraticCurveTo(ctrlX, ctrlY, target.x, target.y)
           ctx.strokeStyle = edgeColor
           ctx.lineWidth = 2
           ctx.stroke()
-
-          // Draw edge label with background for readability
-          const midX = (source.x + target.x) / 2
-          const midY = (source.y + target.y) / 2
-          const label = rel.label || rel.type.replace(/_/g, " ").toLowerCase()
-
-          // Label background
-          ctx.fillStyle = "rgba(255, 255, 255, 0.8)"
-          const labelWidth = ctx.measureText(label).width + 8
-          ctx.fillRect(midX - labelWidth / 2, midY - 12, labelWidth, 16)
-
-          // Label text
-          ctx.fillStyle = edgeColor
-          ctx.font = "10px system-ui"
-          ctx.textAlign = "center"
-          ctx.fillText(label, midX, midY)
         }
+        // Non-active edges when something is selected: hide completely
       }
 
       // Draw nodes
