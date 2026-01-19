@@ -13,6 +13,7 @@ import {
   runEnhancementsPipeline,
 } from "@/lib/pipelines/meeting-ingestion";
 import { setProcessingStep } from "@/lib/pipelines/meeting-ingestion/processing-state";
+import { extractSpeakerNames } from "@/lib/transcription/speaker-extraction";
 
 const DEFAULT_PROCESSING_TIMEOUT_MINUTES = 180;
 const DEFAULT_ORPHANED_JOB_GRACE_MINUTES = 10;
@@ -170,6 +171,27 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
         if (segmentsError) {
           console.error("[transcription-status] Failed to save segments:", segmentsError);
+        } else {
+          // Extract speaker names from context using AI
+          console.log("[transcription-status] Extracting speaker names from context...");
+          const namedSpeakers = await extractSpeakerNames(
+            result.segments,
+            result.language === "he" ? "he" : "en"
+          );
+
+          if (namedSpeakers.length > 0) {
+            // Update segments with extracted speaker names
+            for (const named of namedSpeakers) {
+              if (named.extractedName) {
+                await supabase
+                  .from("transcript_segments")
+                  .update({ speaker_display_name: named.extractedName })
+                  .eq("transcript_id", transcript.id)
+                  .eq("speaker_id", named.speakerId.toLowerCase().replace(/\s+/g, "_"));
+              }
+            }
+            console.log("[transcription-status] Updated", namedSpeakers.filter(s => s.extractedName).length, "speakers with names");
+          }
         }
       }
 
@@ -209,31 +231,40 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       state.transcriptId = transcript.id;
       state.transcriptionResult = result;
 
-      // Run enhancements in background (don't block response)
-      // NOTE: Error handling is now done inside runEnhancementsPipeline which updates DB state
-      runEnhancementsPipeline(supabase, state)
-        .then((result) => {
-          if (!result.success) {
-            console.error("[transcription-status] Enhancement pipeline failed:", result.error);
-            // State already updated in runEnhancementsPipeline
-          } else {
-            console.log("[transcription-status] Enhancement pipeline completed successfully");
-          }
-        })
-        .catch(async (err) => {
-          // This catches unexpected errors not handled by runEnhancementsPipeline
-          console.error("[transcription-status] Enhancement pipeline threw unexpected error:", err);
-          try {
-            await supabase
-              .from("sessions")
-              .update({ processing_state: "failed" })
-              .eq("id", sessionId);
-            await setProcessingStep(supabase, sessionId, "saved_to_memory", "failed",
-              err instanceof Error ? err.message : "Enhancement pipeline crashed");
-          } catch (dbErr) {
-            console.error("[transcription-status] Failed to update error state:", dbErr);
-          }
-        });
+      // Log transcript segment count before running enhancements
+      const { count: segmentCount } = await supabase
+        .from("transcript_segments")
+        .select("*", { count: "exact", head: true })
+        .eq("transcript_id", transcript.id);
+
+      console.log("[transcription-status] Transcript saved with", segmentCount || 0, "segments, starting enhancements...");
+
+      // Run enhancements - MUST await to prevent Vercel from terminating
+      // the function before the pipeline completes. This is critical for
+      // ensuring summary, entities, and embeddings are actually generated.
+      try {
+        console.log("[transcription-status] Starting enhancement pipeline (awaited)...");
+        const enhancementResult = await runEnhancementsPipeline(supabase, state);
+
+        if (!enhancementResult.success) {
+          console.error("[transcription-status] Enhancement pipeline failed:", enhancementResult.error);
+          // Don't fail the whole request - transcription succeeded, enhancements are optional
+        } else {
+          console.log("[transcription-status] Enhancement pipeline completed:", enhancementResult.stats);
+        }
+      } catch (err) {
+        console.error("[transcription-status] Enhancement pipeline threw unexpected error:", err);
+        try {
+          await supabase
+            .from("sessions")
+            .update({ processing_state: "failed" })
+            .eq("id", sessionId);
+          await setProcessingStep(supabase, sessionId, "saved_to_memory", "failed",
+            err instanceof Error ? err.message : "Enhancement pipeline crashed");
+        } catch (dbErr) {
+          console.error("[transcription-status] Failed to update error state:", dbErr);
+        }
+      }
 
       return NextResponse.json({
         status: "completed",

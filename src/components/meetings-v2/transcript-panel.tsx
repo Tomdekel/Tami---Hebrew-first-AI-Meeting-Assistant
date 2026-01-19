@@ -44,10 +44,32 @@ export function TranscriptPanel({
   const containerRef = useRef<HTMLDivElement>(null)
   const activeSegmentRef = useRef<HTMLDivElement | null>(null)
 
-  const allSegments = useMemo(
-    () => rawSegments.filter((s) => !s.is_deleted),
-    [rawSegments]
-  )
+  // Filter out deleted segments and merge consecutive segments from the same speaker
+  const allSegments = useMemo(() => {
+    const filtered = rawSegments.filter((s) => !s.is_deleted)
+    if (filtered.length === 0) return filtered
+
+    // Merge consecutive segments from the same speaker
+    const merged: TranscriptSegment[] = []
+
+    for (const segment of filtered) {
+      const lastMerged = merged[merged.length - 1]
+
+      if (lastMerged && lastMerged.speaker_id === segment.speaker_id) {
+        // Same speaker - merge the text and extend end_time
+        merged[merged.length - 1] = {
+          ...lastMerged,
+          text: lastMerged.text + " " + segment.text,
+          end_time: segment.end_time,
+        }
+      } else {
+        // Different speaker or first segment - add new entry
+        merged.push({ ...segment })
+      }
+    }
+
+    return merged
+  }, [rawSegments])
 
   const speakerColorMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -73,7 +95,9 @@ export function TranscriptPanel({
 
   const highlightText = useCallback((text: string): React.ReactNode => {
     if (!normalizedSearch) return text
-    const regex = new RegExp(`(${normalizedSearch.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")})`, "gi")
+    // Properly escape regex special characters
+    const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(${escapeRegex(normalizedSearch)})`, "gi")
     const parts = text.split(regex)
     return parts.map((part, i) =>
       part.toLowerCase() === normalizedSearch ? (
@@ -198,6 +222,7 @@ export function TranscriptPanel({
             <div
               key={segment.id}
               ref={isActive ? activeSegmentRef : null}
+              data-testid="transcript-segment"
               className={cn(
                 "flex gap-2 p-2 rounded-lg transition-colors",
                 isActive ? "bg-teal-50" : "hover:bg-muted/50"
@@ -232,6 +257,7 @@ export function TranscriptPanel({
                   ) : (
                     <button
                       onClick={() => handleStartEdit(segment.speaker_id, speakerName)}
+                      data-testid="speaker-name"
                       className="flex items-center gap-1 text-xs text-muted-foreground hover:text-teal-600 group"
                     >
                       {speakerName}
@@ -240,6 +266,7 @@ export function TranscriptPanel({
                   )}
                   <button
                     onClick={() => handleTimeClick(segment.start_time)}
+                    data-testid="segment-timestamp"
                     className="text-xs text-muted-foreground hover:text-teal-600 font-mono"
                     dir="ltr"
                   >
