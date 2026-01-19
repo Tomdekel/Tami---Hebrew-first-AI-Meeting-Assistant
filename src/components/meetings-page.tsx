@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Clock,
   Download,
+  FileAudio,
   FileText,
   GitMerge,
   Info,
@@ -19,6 +20,7 @@ import {
   MoreHorizontal,
   PanelLeft,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   Trash2,
@@ -73,6 +75,7 @@ interface MeetingListItem {
   currentStep?: ProcessingStepKey
   context?: string
   source?: string
+  audioUrl?: string | null
 }
 
 interface Speaker {
@@ -167,6 +170,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   const isClient = useClientTime() // Ensure time is formatted in user's local timezone
 
   const { data: sessions = [], isLoading: isLoadingSessions } = useSessionsQuery(50)
+
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(initialMeetingId || null)
   const [showChat, setShowChat] = useState(false)
   const [showDocuments, setShowDocuments] = useState(false)
@@ -223,7 +227,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
 
   const searchParams = useSearchParams()
 
-  const { data: sessionData, isPending: isLoadingSessionDetail } = useSessionQuery(selectedMeetingId, false)
+  const { data: sessionData, isPending: isLoadingSessionDetail, isFetching: isRefetchingSession } = useSessionQuery(selectedMeetingId, false)
   const { data: transcriptData } = useSessionTranscriptQuery(selectedMeetingId)
 
   // Merge session data with transcript
@@ -245,12 +249,14 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([])
 
   useEffect(() => {
+    // Don't clear selection while still loading session data
+    if (isLoadingSessionDetail || isRefetchingSession) return
     if (!selectedMeetingId || session !== null) return
     // Deleted/not found meeting: clear selection and leave detail route.
     isDeletingRef.current = true
     setSelectedMeetingId(null)
     router.replace("/meetings")
-  }, [session, selectedMeetingId, router])
+  }, [session, selectedMeetingId, router, isLoadingSessionDetail, isRefetchingSession])
 
   useEffect(() => {
     // Skip auto-selection during delete to prevent race condition
@@ -303,8 +309,9 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
           .map((person: { display_name: string }) => person.display_name)
           .filter(Boolean)
         setNameSuggestions(names)
-      } catch (error) {
-        console.error("Failed to load people:", error)
+      } catch {
+        // Silently fail - people/autocomplete is an optional feature
+        // This may fail if the people table doesn't exist in the database
       }
     }
     loadPeople()
@@ -327,20 +334,50 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
         status,
         currentStep: getCurrentStep(item),
         context: item.context || undefined,
+        audioUrl: item.audio_url,
       }
     })
   }, [sessions, isRTL, locale, isClient])
 
   const transcriptItems = useMemo(() => {
     const segments: TranscriptSegment[] = session?.transcript?.segments || []
-    return segments.map((segment) => ({
-      id: segment.id,
-      speakerId: segment.speaker_id,
-      speaker: segment.speaker_name || segment.speaker_id,
-      time: formatDuration(segment.start_time),
-      text: segment.text,
-    }))
+    if (segments.length === 0) return []
+
+    // Merge consecutive segments from the same speaker for better readability
+    const merged: {
+      id: string
+      speakerId: string
+      speaker: string
+      time: string
+      text: string
+    }[] = []
+
+    for (const segment of segments) {
+      const lastMerged = merged[merged.length - 1]
+      const speakerName = segment.speaker_display_name || segment.speaker_name || segment.speaker_id
+
+      if (lastMerged && lastMerged.speakerId === segment.speaker_id) {
+        // Same speaker - merge the text
+        merged[merged.length - 1] = {
+          ...lastMerged,
+          text: lastMerged.text + " " + segment.text,
+        }
+      } else {
+        // Different speaker - add new entry
+        merged.push({
+          id: segment.id,
+          speakerId: segment.speaker_id,
+          speaker: speakerName,
+          time: formatDuration(segment.start_time),
+          text: segment.text,
+        })
+      }
+    }
+
+    return merged
   }, [session])
+
+  const hasTranscript = session?.transcript?.segments && session.transcript.segments.length > 0
 
   const speakerNames = useMemo(() => {
     const map = new Map<string, string>()
@@ -784,12 +821,16 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   }
 
   const handleRetryProcessing = async () => {
-    if (!session?.audio_url || isRetrying) return
+    // Use selectedMeeting as fallback when session detail hasn't loaded yet
+    const audioUrl = session?.audio_url ?? selectedMeeting?.audioUrl
+    const sessionId = session?.id ?? selectedMeetingId
+
+    if (!audioUrl || !sessionId || isRetrying) return
 
     setIsRetrying(true)
     try {
       // Use the reprocess endpoint which properly resets processing state
-      const response = await fetch(`/api/sessions/${session.id}/reprocess`, {
+      const response = await fetch(`/api/sessions/${sessionId}/reprocess`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ steps: ["transcription"] }),
@@ -815,7 +856,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
       setIsRetrying(false)
     }
 
-    invalidateSession(session.id)
+    invalidateSession(sessionId)
     invalidateSessionsList()
   }
 
@@ -884,12 +925,18 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   // If status is "processing" or "pending", the transcription has started even if processing_state is outdated
   const isDraft = (session?.processing_state === "draft" || (!session && selectedMeeting?.status === "draft")) &&
     session?.status !== "processing" &&
-    session?.status !== "pending" &&
     session?.status !== "completed"
 
+  const isPendingWithAudio = 
+    (session?.status === "pending" || (!session && selectedMeeting?.status === "pending")) && 
+    (session?.audio_url || selectedMeeting?.audioUrl) && 
+    !hasTranscript
+
   const isProcessing =
-    (session && (session.processing_state === "processing" || session.status === "processing" || session.status === "pending")) ||
-    (!session && selectedMeeting?.status === "processing")
+    (session &&
+      (session.processing_state === "processing" || session.status === "processing" || session.status === "pending") &&
+      !hasTranscript) ||
+      (!session && (selectedMeeting?.status === "processing" || selectedMeeting?.status === "pending"))
 
   const isFailed = (session && (session.processing_state === "failed" || session.status === "failed")) ||
     (!session && selectedMeeting?.status === "failed")
@@ -923,7 +970,34 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
               </Button>
             </div>
             <div className="flex-1 overflow-hidden">
-              {isProcessing ? (
+              {isPendingWithAudio ? (
+                <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+                  <FileAudio className="w-12 h-12 text-blue-500 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">
+                    {isRTL ? "ממתין לעיבוד" : "Waiting for processing"}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    {isRTL ? "הקובץ מוכן. לחץ להתחיל תמלול." : "Audio file ready. Click to start transcription."}
+                  </p>
+                  <Button
+                    onClick={handleRetryProcessing}
+                    disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
+                    className="gap-2"
+                  >
+                    {isRetrying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {isRTL ? "מתחיל..." : "Starting..."}
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        {isRTL ? "התחל תמלול" : "Start Transcription"}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              ) : isProcessing ? (
                 <StatusEmptyState status="processing" section={isRTL ? "התמליל" : "Transcript"} />
               ) : transcriptItems.length > 0 ? (
                 <TranscriptPanel
@@ -1154,7 +1228,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   variant="outline"
                   onClick={handleRetryProcessing}
                   className="border-orange-300 text-orange-700 hover:bg-orange-100 bg-transparent"
-                  disabled={!session?.audio_url || isRetrying}
+                  disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
                 >
                   <RefreshCw className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2", isRetrying && "animate-spin")} />
                   {isRetrying ? (isRTL ? "מעבד..." : "Processing...") : (isRTL ? "נסה שוב" : "Retry")}
@@ -1178,10 +1252,32 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
               variant="outline"
               onClick={handleRetryProcessing}
               className="border-amber-300 text-amber-800 hover:bg-amber-100 bg-transparent flex-shrink-0"
-              disabled={!session?.audio_url || isRetrying}
+              disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
             >
               {isRetrying && <Loader2 className={cn("w-4 h-4 animate-spin", isRTL ? "ml-2" : "mr-2")} />}
               {isRetrying ? (isRTL ? "מתחיל..." : "Starting...") : (isRTL ? "התחל עיבוד" : "Start processing")}
+            </Button>
+          </div>
+        )}
+
+        {isPendingWithAudio && (
+          <div className="mx-4 md:mx-6 mt-4 p-3 rounded-lg border border-blue-200 bg-blue-50/50 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <FileAudio className="w-4 h-4 text-blue-600 flex-shrink-0" />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-medium text-blue-900 text-sm">{isRTL ? "ממתין לעיבוד" : "Waiting for processing"}</span>
+                <span className="text-blue-700 text-sm">{isRTL ? "הקובץ מוכן. לחץ להתחיל תמלול." : "Audio file ready. Click to start transcription."}</span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRetryProcessing}
+              className="border-blue-300 text-blue-800 hover:bg-blue-100 bg-transparent flex-shrink-0"
+              disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
+            >
+              {isRetrying && <Loader2 className={cn("w-4 h-4 animate-spin", isRTL ? "ml-2" : "mr-2")} />}
+              {isRetrying ? (isRTL ? "מתחיל..." : "Starting...") : (isRTL ? "התחל תמלול" : "Start Transcription")}
             </Button>
           </div>
         )}
@@ -1203,7 +1299,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                   variant="outline"
                   onClick={handleRetryProcessing}
                   className="border-red-300 text-red-700 hover:bg-red-100 bg-transparent"
-                  disabled={!session?.audio_url || isRetrying}
+                  disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
                 >
                   <RefreshCw className={cn("w-4 h-4", isRTL ? "ml-2" : "mr-2", isRetrying && "animate-spin")} />
                   {isRetrying ? (isRTL ? "מעבד..." : "Processing...") : (isRTL ? "נסה שוב" : "Retry")}
@@ -1234,13 +1330,9 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                 </CardContent>
               </Card>
             </div>
-          ) : (isLoadingSessionDetail && !selectedMeeting) ? (
+          ) : (isLoadingSessionDetail || isRefetchingSession) && !session ? (
             <div className="p-4 md:p-6">
               <MeetingSkeleton />
-            </div>
-          ) : !session && !isProcessing && !isFailed && !isDraft ? (
-            <div className="p-4 md:p-6">
-              <MeetingSkeleton showAudioPlayer={false} />
             </div>
           ) : (
             <div className="space-y-4">
