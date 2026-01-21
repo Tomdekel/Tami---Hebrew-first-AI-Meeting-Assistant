@@ -1,0 +1,8 @@
+# Exclude large test files and recordings from deployment
+recordings/
+e2e/fixtures/
+tests/audio/
+experiments/
+playwright-report/
+screenshots/
+transcription-test-output/
