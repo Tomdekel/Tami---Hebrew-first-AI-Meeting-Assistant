@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import {
   AlertCircle,
   Calendar,
@@ -29,11 +30,25 @@ import {
 } from "lucide-react"
 import { useLanguage } from "@/contexts/language-context"
 import { MeetingsSidebar } from "@/components/meetings/meetings-sidebar"
-import { TranscriptPanel } from "@/components/meetings/transcript-panel"
-import { MeetingChat } from "@/components/meetings/meeting-chat"
-import { DocumentsPanel } from "@/components/meetings/documents-panel"
-import { AudioPlayer } from "@/components/meetings/audio-player"
 import { ProcessingStepper, type ProcessingStepKey, type ProcessingStepStatus } from "@/components/processing-stepper"
+
+// Lazy-load heavy components for better initial page load
+const TranscriptPanel = dynamic(() => import("@/components/meetings/transcript-panel").then(mod => ({ default: mod.TranscriptPanel })), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
+})
+const MeetingChat = dynamic(() => import("@/components/meetings/meeting-chat").then(mod => ({ default: mod.MeetingChat })), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
+})
+const DocumentsPanel = dynamic(() => import("@/components/meetings/documents-panel").then(mod => ({ default: mod.DocumentsPanel })), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
+})
+const AudioPlayer = dynamic(() => import("@/components/meetings/audio-player").then(mod => ({ default: mod.AudioPlayer })), {
+  ssr: false,
+  loading: () => <div className="h-24 flex items-center justify-center"><Loader2 className="h-4 w-4 animate-spin" /></div>
+})
 import { StatusEmptyState } from "@/components/status-empty-state"
 import { MeetingSkeleton } from "@/components/meetings/meeting-skeleton"
 import { Button } from "@/components/ui/button"
@@ -55,7 +70,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { useToast } from "@/hooks/use-toast"
 import { updateSession, deleteSession, startTranscription } from "@/hooks/use-session"
-import { useActionItemsQuery, useInvalidateSessions, useSessionQuery, useSessionTranscriptQuery, useSessionsQuery, useSpeakersQuery, useTranscriptionStatusPolling } from "@/hooks/use-session-query"
+import { useActionItemsQuery, useCompletionNotification, useEnhancementTrigger, useInvalidateSessions, useRealtimeSessionStatus, useSessionQuery, useSessionRecovery, useSessionTranscriptQuery, useSessionsQuery, useSpeakersQuery, useTranscriptionStatusPolling } from "@/hooks/use-session-query"
 import { cn } from "@/lib/utils"
 import { getSpeakerColor } from "@/lib/speaker-colors"
 import type { Session, SessionWithRelations, TranscriptSegment } from "@/lib/types/database"
@@ -71,7 +86,7 @@ interface MeetingListItem {
   time: string
   duration: string
   participants: string[]
-  status: "completed" | "processing" | "pending" | "draft" | "failed"
+  status: "completed" | "processing" | "pending" | "draft" | "failed" | "enhancing"
   currentStep?: ProcessingStepKey
   context?: string
   source?: string
@@ -110,9 +125,11 @@ function formatDuration(seconds: number | null) {
   return `${minutes}:${remaining.toString().padStart(2, "0")}`
 }
 
-function mapStatus(session: Session): "completed" | "processing" | "draft" | "failed" {
+function mapStatus(session: Session): "completed" | "processing" | "draft" | "failed" | "enhancing" {
   if (session.processing_state === "draft") return "draft"
   if (session.processing_state === "failed" || session.status === "failed") return "failed"
+  // Show enhancing state for pending_enhancements or enhancing
+  if (session.processing_state === "pending_enhancements" || session.processing_state === "enhancing") return "enhancing"
   if (session.processing_state === "processing" || session.status === "processing" || session.status === "pending") return "processing"
   return "completed"
 }
@@ -143,8 +160,18 @@ function getSectionStatus(session: Session | MeetingListItem | null | undefined,
   const status = (session as MeetingListItem).status
   const processingState = (session as Session).processing_state
 
+  // Transcription in progress
   if (processingState === "processing" || status === "processing" || status === "pending") {
     return "processing"
+  }
+  // Enhancement in progress (summary, entities, embeddings)
+  // PROGRESSIVE DISCLOSURE: Transcript should show content during enhancement if available
+  if (processingState === "pending_enhancements" || processingState === "enhancing" || status === "enhancing") {
+    // If this is the transcript section and we have content, show it instead of spinner
+    if (sectionType === "transcript" && hasContent) {
+      return "partial_ready" // New status - transcript ready, enhancements in progress
+    }
+    return "enhancing"
   }
   if (processingState === "draft" || status === "draft") return "draft"
   if (processingState === "failed" || status === "failed") return "failed"
@@ -239,8 +266,21 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
     } as SessionWithRelations
   }, [sessionData, transcriptData])
 
-  // Poll for transcription status updates when session is processing
+  // Poll for transcription status updates when session is processing (fallback)
   useTranscriptionStatusPolling(session)
+  // Subscribe to realtime status updates for instant updates (preferred)
+  useRealtimeSessionStatus(selectedMeetingId)
+  // Auto-trigger enhancement pipeline when transcription completes
+  const { isEnhancing, enhancementError, retryEnhancement } = useEnhancementTrigger(session)
+  // Show toast notification when processing completes
+  useCompletionNotification(session, () => {
+    toast({
+      title: isRTL ? "הפגישה מוכנה" : "Meeting Ready",
+      description: isRTL ? "התמליל, הסיכום והתובנות מוכנים לצפייה" : "Transcript, summary and insights are ready to view",
+    })
+  })
+  // Auto-recover stuck sessions (content exists but state is wrong)
+  const { isRecovering, wasRecovered, triggerRecovery } = useSessionRecovery(session)
   const { data: speakersData = [] } = useSpeakersQuery(selectedMeetingId)
   const speakers = speakersData as Speaker[]
   const { data: actionItemsData } = useActionItemsQuery(selectedMeetingId)
@@ -340,7 +380,10 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   }, [sessions, isRTL, locale, isClient])
 
   const transcriptItems = useMemo(() => {
-    const segments: TranscriptSegment[] = session?.transcript?.segments || []
+    // Filter out deleted segments (secondary safeguard - API should already filter)
+    const segments: TranscriptSegment[] = (session?.transcript?.segments || []).filter(
+      (s) => !s.is_deleted
+    )
     if (segments.length === 0) return []
 
     // Merge consecutive segments from the same speaker for better readability
@@ -829,7 +872,72 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
 
     setIsRetrying(true)
     try {
-      // Use the reprocess endpoint which properly resets processing state
+      // Try the recovery endpoint - it checks if content exists and fixes the state
+      // IMPORTANT: This should NEVER delete content, only fix state
+      const recoveryResponse = await fetch(`/api/sessions/${sessionId}/recover`, {
+        method: "POST",
+      })
+
+      const recoveryData = await recoveryResponse.json()
+      console.log("[handleRetryProcessing] Recovery response:", recoveryData)
+
+      if (recoveryResponse.ok && recoveryData.recovered) {
+        // Recovery successful - state was fixed
+        if (recoveryData.status === "completed") {
+          toast({
+            title: isRTL ? "הפגישה שוחזרה" : "Meeting recovered",
+            description: isRTL ? "הפגישה מוכנה לצפייה" : "The meeting is ready to view",
+          })
+        } else if (recoveryData.needsEnhancement) {
+          toast({
+            title: isRTL ? "ממשיך עיבוד" : "Continuing processing",
+            description: isRTL ? "יוצר סיכום..." : "Generating summary...",
+          })
+        } else {
+          toast({
+            title: isRTL ? "הסטטוס עודכן" : "Status updated",
+            description: isRTL ? "הפגישה מעובדת" : "Meeting is being processed",
+          })
+        }
+      } else if (recoveryData.status === "processing") {
+        // Transcription is still in progress
+        toast({
+          title: isRTL ? "העיבוד פועל" : "Processing active",
+          description: isRTL ? "התמלול עדיין רץ, אנא המתן" : "Transcription is still running, please wait",
+        })
+      } else if (!recoveryResponse.ok) {
+        throw new Error(recoveryData.error || "Recovery check failed")
+      } else {
+        // Recovery didn't change anything - just refresh
+        toast({
+          title: isRTL ? "מרענן" : "Refreshing",
+          description: isRTL ? "טוען נתונים מעודכנים..." : "Loading updated data...",
+        })
+      }
+    } catch (error) {
+      console.error("Retry processing failed:", error)
+      toast({
+        title: isRTL ? "שגיאה" : "Error",
+        description: isRTL ? "לא הצלחנו לבדוק את הסטטוס" : "Failed to check status",
+        variant: "destructive",
+      })
+    } finally {
+      setIsRetrying(false)
+    }
+
+    invalidateSession(sessionId)
+    invalidateSessionsList()
+  }
+
+  // Separate handler for explicitly starting fresh transcription (user explicitly requests reprocess)
+  const handleStartTranscription = async () => {
+    const audioUrl = session?.audio_url ?? selectedMeeting?.audioUrl
+    const sessionId = session?.id ?? selectedMeetingId
+
+    if (!audioUrl || !sessionId || isRetrying) return
+
+    setIsRetrying(true)
+    try {
       const response = await fetch(`/api/sessions/${sessionId}/reprocess`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -838,18 +946,18 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
 
       if (!response.ok) {
         const error = await response.json()
-        throw new Error(error.error || "Reprocess failed")
+        throw new Error(error.error || "Failed to start transcription")
       }
 
       toast({
-        title: isRTL ? "העיבוד התחיל מחדש" : "Processing restarted",
-        description: isRTL ? "הפגישה מעובדת כעת" : "The meeting is now being processed",
+        title: isRTL ? "התמלול התחיל" : "Transcription started",
+        description: isRTL ? "הפגישה מעובדת כעת" : "Meeting is now being processed",
       })
     } catch (error) {
-      console.error("Retry processing failed:", error)
+      console.error("Start transcription failed:", error)
       toast({
         title: isRTL ? "שגיאה" : "Error",
-        description: isRTL ? "לא הצלחנו להתחיל את העיבוד מחדש" : "Failed to restart processing",
+        description: isRTL ? "לא הצלחנו להתחיל את התמלול" : "Failed to start transcription",
         variant: "destructive",
       })
     } finally {
@@ -863,7 +971,8 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
   // Helper to detect stuck sessions (processing for more than 10 minutes)
   const isStuckSession = (s: Session | null | undefined): boolean => {
     if (!s) return false
-    if (s.processing_state !== "processing") return false
+    // Check both processing and enhancing states
+    if (s.processing_state !== "processing" && s.processing_state !== "enhancing") return false
 
     // Use processing steps' startedAt timestamps instead of updated_at
     // This ensures we only show "stuck" after processing has actually been running
@@ -932,11 +1041,22 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
     (session?.audio_url || selectedMeeting?.audioUrl) && 
     !hasTranscript
 
-  const isProcessing =
+  // Transcription is in progress (audio being processed)
+  const isTranscribing =
     (session &&
       (session.processing_state === "processing" || session.status === "processing" || session.status === "pending") &&
       !hasTranscript) ||
       (!session && (selectedMeeting?.status === "processing" || selectedMeeting?.status === "pending"))
+
+  // Enhancement is in progress (summary, entities, embeddings being generated)
+  // This happens AFTER transcription completes
+  const isEnhancingState =
+    (session && (session.processing_state === "pending_enhancements" || session.processing_state === "enhancing")) ||
+    isEnhancing ||
+    (!session && selectedMeeting?.status === "enhancing")
+
+  // Combined processing state (either transcribing or enhancing)
+  const isProcessing = isTranscribing || isEnhancingState
 
   const isFailed = (session && (session.processing_state === "failed" || session.status === "failed")) ||
     (!session && selectedMeeting?.status === "failed")
@@ -980,7 +1100,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                     {isRTL ? "הקובץ מוכן. לחץ להתחיל תמלול." : "Audio file ready. Click to start transcription."}
                   </p>
                   <Button
-                    onClick={handleRetryProcessing}
+                    onClick={handleStartTranscription}
                     disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
                     className="gap-2"
                   >
@@ -997,7 +1117,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                     )}
                   </Button>
                 </div>
-              ) : isProcessing ? (
+              ) : isTranscribing ? (
                 <StatusEmptyState status="processing" section={isRTL ? "התמליל" : "Transcript"} />
               ) : transcriptItems.length > 0 ? (
                 <TranscriptPanel
@@ -1208,6 +1328,12 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
             <ProcessingStepper
               steps={(session?.processing_steps || []).map(s => ({ step: s.step as ProcessingStepKey, status: s.status as ProcessingStepStatus }))}
             />
+            {/* Show "Transcript ready" indicator during enhancement phase */}
+            {isEnhancingState && hasTranscript && (
+              <span className="text-xs text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                {isRTL ? "✓ תמליל מוכן" : "✓ Transcript ready"}
+              </span>
+            )}
           </div>
         )}
 
@@ -1250,7 +1376,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={handleRetryProcessing}
+              onClick={handleStartTranscription}
               className="border-amber-300 text-amber-800 hover:bg-amber-100 bg-transparent flex-shrink-0"
               disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
             >
@@ -1272,7 +1398,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={handleRetryProcessing}
+              onClick={handleStartTranscription}
               className="border-blue-300 text-blue-800 hover:bg-blue-100 bg-transparent flex-shrink-0"
               disabled={!(session?.audio_url ?? selectedMeeting?.audioUrl) || isRetrying}
             >
@@ -1392,7 +1518,26 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                         maxLength={5000}
                       />
                     ) : summaryText ? (
-                      <p className="text-sm text-foreground leading-relaxed">{summaryText}</p>
+                      <div className="space-y-4">
+                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{summaryText}</p>
+                        {session?.summary?.sections && Array.isArray(session.summary.sections) && session.summary.sections.length > 0 && (
+                          <div className="space-y-3 pt-2">
+                            {session.summary.sections.map((section: { title: string; bullets: string[] }, idx: number) => (
+                              <div key={idx} className="space-y-2">
+                                <h4 className="text-sm font-semibold text-foreground">{section.title}</h4>
+                                <ul className="space-y-1 text-sm text-muted-foreground">
+                                  {section.bullets.map((bullet: string, bulletIdx: number) => (
+                                    <li key={bulletIdx} className="flex gap-2">
+                                      <span className="text-muted-foreground">•</span>
+                                      <span className="flex-1">{bullet}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <StatusEmptyState status={getSectionStatus(session || selectedMeeting, !!summaryText, "summary")} />
                     )}
@@ -1675,78 +1820,84 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
                       </p>
                     )}
 
-                    <div className="flex flex-wrap gap-3">
-                      {speakers.map((speaker) => {
-                        const speakerColor = getSpeakerColor(speaker.speakerId)
-                        return (
-                          <div key={speaker.speakerId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg group">
-                            <Avatar className="h-8 w-8">
-                              <AvatarFallback className={cn(speakerColor.bg, speakerColor.text, "text-xs")}>
-                                {getInitials(speaker.speakerName)}
-                              </AvatarFallback>
-                            </Avatar>
-                            {editingSpeakerId === speaker.speakerId ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  value={editingSpeakerName}
-                                  onChange={(e) => setEditingSpeakerName(e.target.value)}
-                                  className="w-28 h-7 text-sm"
-                                  autoFocus
-                                  list={mergedSuggestions.length > 0 ? "speaker-suggestions" : undefined}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") handleSaveSpeaker()
-                                    if (e.key === "Escape") setEditingSpeakerId(null)
-                                  }}
-                                />
-                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveSpeaker}>
-                                  <Check className="w-3 h-3 text-green-600" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <>
-                                <div>
-                                  <p className="text-sm font-medium">{speaker.speakerName}</p>
-                                  <p className="text-xs text-muted-foreground">{speaker.segmentCount} {isRTL ? "קטעים" : "segments"}</p>
+                    {isProcessing || isEnhancingState ? (
+                      <StatusEmptyState status={isEnhancingState ? "enhancing" : "processing"} section={isRTL ? "דוברים" : "Speakers"} />
+                    ) : speakers.length > 0 ? (
+                      <div className="flex flex-wrap gap-3">
+                        {speakers.map((speaker) => {
+                          const speakerColor = getSpeakerColor(speaker.speakerId)
+                          return (
+                            <div key={speaker.speakerId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg group">
+                              <Avatar className="h-8 w-8">
+                                <AvatarFallback className={cn(speakerColor.bg, speakerColor.text, "text-xs")}>
+                                  {getInitials(speaker.speakerName)}
+                                </AvatarFallback>
+                              </Avatar>
+                              {editingSpeakerId === speaker.speakerId ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    value={editingSpeakerName}
+                                    onChange={(e) => setEditingSpeakerName(e.target.value)}
+                                    className="w-28 h-7 text-sm"
+                                    autoFocus
+                                    list={mergedSuggestions.length > 0 ? "speaker-suggestions" : undefined}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleSaveSpeaker()
+                                      if (e.key === "Escape") setEditingSpeakerId(null)
+                                    }}
+                                  />
+                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveSpeaker}>
+                                    <Check className="w-3 h-3 text-green-600" />
+                                  </Button>
                                 </div>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0 md:opacity-0 group-hover:opacity-100 transition-opacity"
-                                      aria-label={isRTL ? `פעולות עבור ${speaker.speakerName}` : `Actions for ${speaker.speakerName}`}
-                                    >
-                                      <MoreHorizontal className="w-3 h-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
-                                      <Pencil className="w-3 h-3 me-2" />
-                                      {isRTL ? "שנה שם" : "Rename"}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleOpenMerge(speaker)}>
-                                      <GitMerge className="w-3 h-3 me-2" />
-                                      {isRTL ? "מזג עם דובר אחר" : "Merge with another"}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onClick={() => {
-                                        // TODO: API call to delete speaker
-                                        toast({ title: isRTL ? "דובר נמחק" : "Speaker deleted" })
-                                      }}
-                                      className="text-red-600"
-                                    >
-                                      <Trash2 className="w-3 h-3 me-2" />
-                                      {isRTL ? "מחק" : "Delete"}
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
+                              ) : (
+                                <>
+                                  <div>
+                                    <p className="text-sm font-medium">{speaker.speakerName}</p>
+                                    <p className="text-xs text-muted-foreground">{speaker.segmentCount} {isRTL ? "קטעים" : "segments"}</p>
+                                  </div>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 md:opacity-0 group-hover:opacity-100 transition-opacity"
+                                        aria-label={isRTL ? `פעולות עבור ${speaker.speakerName}` : `Actions for ${speaker.speakerName}`}
+                                      >
+                                        <MoreHorizontal className="w-3 h-3" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => handleEditSpeaker(speaker)}>
+                                        <Pencil className="w-3 h-3 me-2" />
+                                        {isRTL ? "שנה שם" : "Rename"}
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleOpenMerge(speaker)}>
+                                        <GitMerge className="w-3 h-3 me-2" />
+                                        {isRTL ? "מזג עם דובר אחר" : "Merge with another"}
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          // TODO: API call to delete speaker
+                                          toast({ title: isRTL ? "דובר נמחק" : "Speaker deleted" })
+                                        }}
+                                        className="text-red-600"
+                                      >
+                                        <Trash2 className="w-3 h-3 me-2" />
+                                        {isRTL ? "מחק" : "Delete"}
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground ms-8">{isRTL ? "לא זוהו דוברים" : "No speakers identified"}</p>
+                    )}
                     {mergedSuggestions.length > 0 && (
                       <datalist id="speaker-suggestions">
                         {mergedSuggestions.map((name) => (
@@ -1811,7 +1962,7 @@ export function MeetingsPage({ initialMeetingId }: MeetingsPageProps) {
               </Button>
             </div>
             <div className="flex-1 overflow-hidden">
-              {session && isProcessing ? (
+              {session && isTranscribing ? (
                 <StatusEmptyState status="processing" section={isRTL ? "התמליל" : "Transcript"} />
               ) : transcriptItems.length > 0 ? (
                 <TranscriptPanel
