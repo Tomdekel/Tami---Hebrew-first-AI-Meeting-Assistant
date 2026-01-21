@@ -37,13 +37,13 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useLanguage } from "@/contexts/language-context"
 import { useRecording, type RecordingMode as AudioMode, type AutoEndReason } from "@/hooks/use-recording"
-import { uploadAudioBlob, uploadAudioChunk, combineAudioChunks, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails } from "@/lib/audio"
+import { uploadAudioBlob, uploadAudioBlobWithProgress, uploadAudioChunk, deleteAudioChunks, validateAudioForSpeech, formatValidationDetails, validateAudioUrl, downloadBlobLocally } from "@/lib/audio"
 import { createSession, startTranscription } from "@/hooks/use-session"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import { Waveform } from "@/components/recording/waveform"
 import { IdleWaveform } from "@/components/recording/idle-waveform"
-import { SUPPORTED_TRANSCRIPT_EXTENSIONS } from "@/lib/parsers"
+import { SUPPORTED_TRANSCRIPT_EXTENSIONS } from "@/lib/parsers/constants"
 import type { CalendarEvent } from "@/features/meeting-bots/types"
 import { useInvalidateSessions } from "@/hooks/use-session-query"
 
@@ -51,6 +51,53 @@ const MIN_AUTO_TRANSCRIBE_DURATION = 60
 
 // Feature flag: Calendar import (hidden until backend env vars are configured)
 const SHOW_CALENDAR_IMPORT = false
+
+/**
+ * PATCH a session with retry logic for transient failures
+ */
+async function patchSessionWithRetry(
+  sessionId: string,
+  body: Record<string, unknown>,
+  maxRetries = 3
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      // If success or client error (4xx), don't retry
+      if (response.ok || (response.status >= 400 && response.status < 500)) {
+        return response;
+      }
+
+      // Server error (5xx) - retry
+      const errorData = await response.json().catch(() => ({}));
+      lastError = new Error(errorData.error || `PATCH failed with status ${response.status}`);
+      console.error(`[recording] PATCH attempt ${attempt}/${maxRetries} failed:`, lastError.message);
+
+      if (attempt < maxRetries) {
+        const delay = 1000 * Math.pow(2, attempt - 1); // 1s, 2s, 4s
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`[recording] PATCH attempt ${attempt}/${maxRetries} error:`, lastError.message);
+
+      if (attempt < maxRetries) {
+        const delay = 1000 * Math.pow(2, attempt - 1);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  // All retries exhausted, throw
+  throw lastError || new Error("PATCH failed after all retries");
+}
 
 type UploadType = "audio" | "transcript" | "record"
 type UploadStatus = "idle" | "uploading" | "processing" | "complete" | "error"
@@ -125,6 +172,10 @@ export function NewMeetingPage() {
   const [transcriptProgress, setTranscriptProgress] = useState(0)
   const [transcriptError, setTranscriptError] = useState<string | null>(null)
 
+  // Upload progress for recordings
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
   const [showShortMeetingDialog, setShowShortMeetingDialog] = useState(false)
   const [shortMeetingDuration, setShortMeetingDuration] = useState(0)
   const [pendingShortMeetingAction, setPendingShortMeetingAction] = useState<(() => Promise<void>) | null>(null)
@@ -144,6 +195,10 @@ export function NewMeetingPage() {
   const sessionIdRef = useRef<string | null>(null)
   const completedRef = useRef(false)
   const failedChunksRef = useRef<Set<number>>(new Set())
+
+  // State for UI display (refs don't trigger re-renders)
+  const [uploadedChunks, setUploadedChunks] = useState(0)
+  const [failedChunksCount, setFailedChunksCount] = useState(0)
 
   const meetingLanguage = language
 
@@ -204,6 +259,8 @@ export function NewMeetingPage() {
 
   const processFile = useCallback(
     async (file: File, fileId: string, skipDurationCheck: boolean = false) => {
+      let createdSessionId: string | null = null
+
       try {
         const supabase = createClient()
         const {
@@ -242,10 +299,22 @@ export function NewMeetingPage() {
           context: meetingContext || undefined,
           detected_language: meetingLanguage,
         })
+        createdSessionId = session.id
 
-        updateFileStatus(fileId, { progress: 50, sessionId: session.id })
+        updateFileStatus(fileId, { progress: 30, sessionId: session.id })
 
-        const audioResult = await uploadAudioBlob(file, user.id, session.id, file.name)
+        // Use progress-tracking upload
+        const audioResult = await uploadAudioBlobWithProgress(
+          file,
+          user.id,
+          session.id,
+          (percent) => {
+            // Map upload progress to 30-70% of overall progress
+            const overallProgress = 30 + Math.round(percent * 0.4)
+            updateFileStatus(fileId, { progress: overallProgress })
+          },
+          { fileName: file.name }
+        )
 
         await fetch(`/api/sessions/${session.id}`, {
           method: "PATCH",
@@ -269,6 +338,13 @@ export function NewMeetingPage() {
         }, 500)
       } catch (error) {
         console.error("Upload failed:", error)
+        if (createdSessionId) {
+          await fetch(`/api/sessions/${createdSessionId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "failed" }),
+          }).catch(() => {})
+        }
         updateFileStatus(fileId, {
           status: "error",
           error: error instanceof Error ? error.message : "Unknown error",
@@ -292,7 +368,7 @@ export function NewMeetingPage() {
       }
 
       Array.from(files).forEach((file) => {
-        if (!file.type.startsWith("audio/") && !file.type.startsWith("video/")) {
+        if (!file.type.startsWith("audio/")) {
           toast.error(isRTL ? "קובץ לא נתמך" : "Unsupported file", {
             description: isRTL ? "אנא העלה קובץ שמע" : "Please upload an audio file",
           })
@@ -321,6 +397,8 @@ export function NewMeetingPage() {
   const handleRecordingComplete = useCallback(
     async (blob: Blob, skipDurationCheck: boolean = false, durationSecs?: number) => {
       setIsProcessingRecording(true)
+      setUploadProgress(0)
+      setUploadError(null)
 
       try {
         const supabase = createClient()
@@ -359,7 +437,11 @@ export function NewMeetingPage() {
           return
         }
 
-        toast.info(isRTL ? "מעבד הקלטה" : "Processing recording")
+        // Show uploading status with file size info
+        const sizeMB = (blob.size / (1024 * 1024)).toFixed(1)
+        toast.info(isRTL ? `מעלה הקלטה (${sizeMB}MB)...` : `Uploading recording (${sizeMB}MB)...`, {
+          duration: 10000,
+        })
 
         let audioResult
         const hasFailedChunks = failedChunksRef.current.size > 0
@@ -387,18 +469,29 @@ export function NewMeetingPage() {
             sessionIdRef.current = session.id
           }
 
-          audioResult = await uploadAudioBlob(blob, user.id, sessionIdRef.current)
+          // Use the new upload function with progress tracking
+          audioResult = await uploadAudioBlobWithProgress(
+            blob,
+            user.id,
+            sessionIdRef.current,
+            (percent) => {
+              setUploadProgress(percent)
+            }
+          )
 
-          const patchResponse = await fetch(`/api/sessions/${sessionIdRef.current}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              audio_url: audioResult.url,
-              status: "pending",
-              title: meetingTitle || generateDefaultTitle(),
-              ...(meetingContext ? { context: meetingContext } : {}),
-              ...(actualDuration ? { duration_seconds: Math.round(actualDuration) } : {}),
-            }),
+          // Validate URL is accessible before updating session
+          const isUrlValid = await validateAudioUrl(audioResult.url)
+          if (!isUrlValid) {
+            console.error("[recording] Audio URL validation failed:", audioResult.url)
+            throw new Error("Upload succeeded but file is not accessible. Please try again.")
+          }
+
+          const patchResponse = await patchSessionWithRetry(sessionIdRef.current, {
+            audio_url: audioResult.url,
+            status: "pending",
+            title: meetingTitle || generateDefaultTitle(),
+            ...(meetingContext ? { context: meetingContext } : {}),
+            ...(actualDuration ? { duration_seconds: Math.round(actualDuration) } : {}),
           })
 
           if (!patchResponse.ok) {
@@ -406,19 +499,85 @@ export function NewMeetingPage() {
             throw new Error(errorData.error || "Failed to update session")
           }
         } else {
-          audioResult = await combineAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
-          await deleteAudioChunks(user.id, sessionIdRef.current, chunkCountRef.current)
+          // Use server-side chunk combination for better memory handling
+          // This supports long recordings up to 120 minutes (240 chunks)
+          toast.info(isRTL ? "ממזג חלקי הקלטה..." : "Combining recording chunks...", {
+            duration: 10000,
+          })
 
-          const patchChunkResponse = await fetch(`/api/sessions/${sessionIdRef.current}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              audio_url: audioResult.url,
-              status: "pending",
-              title: meetingTitle || generateDefaultTitle(),
-              ...(meetingContext ? { context: meetingContext } : {}),
-              ...(actualDuration ? { duration_seconds: Math.round(actualDuration) } : {}),
-            }),
+          let combineSucceeded = false
+          try {
+            const combineResponse = await fetch(`/api/sessions/${sessionIdRef.current}/combine-chunks`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chunkCount: chunkCountRef.current,
+              }),
+            })
+
+            if (combineResponse.ok) {
+              const combineData = await combineResponse.json()
+              audioResult = { url: combineData.url, path: combineData.path }
+              combineSucceeded = true
+
+              // Log if any chunks failed (server still succeeded with remaining chunks)
+              if (combineData.chunksFailed > 0) {
+                console.warn(`[recording] ${combineData.chunksFailed} chunks failed during combination`)
+              }
+            } else {
+              const errorData = await combineResponse.json().catch(() => ({}))
+              console.error("[recording] Combine-chunks failed:", errorData.error)
+            }
+          } catch (combineError) {
+            console.error("[recording] Combine-chunks error:", combineError)
+          }
+
+          // FALLBACK: If combine-chunks failed, upload the full blob instead
+          if (!combineSucceeded) {
+            console.log("[recording] Falling back to full blob upload after combine-chunks failure")
+            toast.warning(
+              isRTL
+                ? "מיזוג נכשל, מעלה הקלטה מלאה..."
+                : "Combine failed, uploading full recording...",
+              { duration: 5000 }
+            )
+
+            // Clean up failed chunks
+            try {
+              await deleteAudioChunks(user.id, sessionIdRef.current!, chunkCountRef.current)
+            } catch (cleanupError) {
+              console.error("[recording] Failed to clean up chunks:", cleanupError)
+            }
+
+            // Upload full blob with progress
+            audioResult = await uploadAudioBlobWithProgress(
+              blob,
+              user.id,
+              sessionIdRef.current!,
+              (percent) => {
+                setUploadProgress(percent)
+              }
+            )
+          }
+
+          // audioResult must be defined at this point (either from combine or fallback)
+          if (!audioResult) {
+            throw new Error("Failed to obtain audio result from upload or combination")
+          }
+
+          // Validate URL is accessible before updating session
+          const isUrlValid = await validateAudioUrl(audioResult.url)
+          if (!isUrlValid) {
+            console.error("[recording] Audio URL validation failed:", audioResult.url)
+            throw new Error("Upload succeeded but file is not accessible. Please try again.")
+          }
+
+          const patchChunkResponse = await patchSessionWithRetry(sessionIdRef.current!, {
+            audio_url: audioResult.url,
+            status: "pending",
+            title: meetingTitle || generateDefaultTitle(),
+            ...(meetingContext ? { context: meetingContext } : {}),
+            ...(actualDuration ? { duration_seconds: Math.round(actualDuration) } : {}),
           })
 
           if (!patchChunkResponse.ok) {
@@ -428,23 +587,52 @@ export function NewMeetingPage() {
         }
 
         toast.success(isRTL ? "ההעלאה הושלמה" : "Upload complete")
-        await startTranscription(sessionIdRef.current!)
+        const sessionId = sessionIdRef.current
+        if (!sessionId) {
+          throw new Error("Missing session for transcription")
+        }
+        await startTranscription(sessionId)
         invalidateSessionsList()
         // Delay navigation to allow React Query cache to sync
         setTimeout(() => {
-          router.push(`/meetings/${sessionIdRef.current}`)
+          router.push(`/meetings/${sessionId}`)
         }, 500)
       } catch (error) {
         console.error("Failed to process recording:", error)
+        const errorMessage = error instanceof Error ? error.message : "Unknown error"
+
+        // EMERGENCY: Save recording locally if upload fails
+        if (blob && blob.size > 1000) {
+          console.log("[recording] Upload failed - triggering emergency local save");
+          downloadBlobLocally(blob, sessionIdRef.current);
+          toast.info(
+            isRTL
+              ? "ההקלטה נשמרה לתיקיית ההורדות כגיבוי"
+              : "Recording saved to Downloads as backup",
+            { duration: 10000 }
+          );
+        }
+
+        if (sessionIdRef.current) {
+          await fetch(`/api/sessions/${sessionIdRef.current}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "failed" }),
+          }).catch(() => {})
+        }
+        setUploadError(errorMessage)
         toast.error(isRTL ? "העלאה נכשלה" : "Upload failed", {
-          description: error instanceof Error ? error.message : "Unknown error",
-          duration: 8000,
+          description: errorMessage,
+          duration: 10000,
         })
       } finally {
         setIsProcessingRecording(false)
         chunkCountRef.current = 0
         sessionIdRef.current = null
         failedChunksRef.current.clear()
+        // Reset UI state
+        setUploadedChunks(0)
+        setFailedChunksCount(0)
       }
     },
     [generateDefaultTitle, meetingContext, meetingLanguage, meetingTitle, router, isRTL, invalidateSessionsList],
@@ -453,7 +641,6 @@ export function NewMeetingPage() {
   const handleChunk = useCallback(
     async (chunk: Blob, index: number) => {
       const MAX_RETRIES = 3
-      const RETRY_DELAY_MS = 1000
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -479,17 +666,26 @@ export function NewMeetingPage() {
             await uploadAudioChunk(chunk, user.id, sessionIdRef.current, index)
             chunkCountRef.current = index + 1
             failedChunksRef.current.delete(index)
+            // Update state for UI display
+            setUploadedChunks(index + 1)
+            setFailedChunksCount(failedChunksRef.current.size)
             return
           }
         } catch (error) {
           console.error(`Chunk ${index} upload failed (attempt ${attempt}/${MAX_RETRIES}):`, error)
 
           if (attempt < MAX_RETRIES) {
-            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt))
+            // Exponential backoff with jitter: base 1s, 2s, 4s + up to 50% jitter, capped at 10s
+            const baseDelay = 1000 * Math.pow(2, attempt - 1)
+            const jitter = Math.random() * baseDelay * 0.5 // 50% jitter to prevent thundering herd
+            const delay = Math.min(baseDelay + jitter, 10000)
+            await new Promise((resolve) => setTimeout(resolve, delay))
             continue
           }
 
           failedChunksRef.current.add(index)
+          // Update state for UI display
+          setFailedChunksCount(failedChunksRef.current.size)
           if (failedChunksRef.current.size <= 3) {
             toast.error(isRTL ? "העלאה נכשלה" : "Upload failed", {
               description: isRTL
@@ -941,7 +1137,7 @@ export function NewMeetingPage() {
                 <input
                   type="file"
                   multiple
-                  accept="audio/*,video/*"
+                  accept="audio/*"
                   className="sr-only"
                   id="file-upload"
                   onChange={(e) => {
@@ -952,7 +1148,7 @@ export function NewMeetingPage() {
                 <div className="text-center space-y-2 pointer-events-none">
                   <Upload className="w-8 h-8 mx-auto text-muted-foreground" />
                   <p className="text-sm font-medium">
-                    {isRTL ? "גרור קבצי שמע/וידאו לכאן" : "Drag audio/video files here"}
+                    {isRTL ? "גרור קבצי שמע לכאן" : "Drag audio files here"}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {isRTL ? "או לחץ כדי לבחור קבצים" : "Or click to select files"}
@@ -1214,6 +1410,18 @@ export function NewMeetingPage() {
                       </div>
                     </div>
 
+                    {/* Chunk upload status during recording */}
+                    {(recordingState === "recording" || recordingState === "paused") && uploadedChunks > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {uploadedChunks} {isRTL ? "חלקים הועלו" : "chunks uploaded"}
+                        {failedChunksCount > 0 && (
+                          <span className="text-amber-500">
+                            {" "}({failedChunksCount} {isRTL ? "ממתינים" : "pending"})
+                          </span>
+                        )}
+                      </p>
+                    )}
+
                     {recordingError && (
                       <div className="text-sm text-red-500 flex items-center gap-2">
                         <AlertCircle className="w-4 h-4" />
@@ -1222,9 +1430,26 @@ export function NewMeetingPage() {
                     )}
 
                     {isProcessingRecording && (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        {isRTL ? "מעבד הקלטה" : "Processing recording"}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          {uploadProgress > 0 && uploadProgress < 100
+                            ? isRTL
+                              ? `מעלה הקלטה... ${uploadProgress}%`
+                              : `Uploading recording... ${uploadProgress}%`
+                            : isRTL
+                              ? "מעבד הקלטה"
+                              : "Processing recording"}
+                        </div>
+                        {uploadProgress > 0 && (
+                          <Progress value={uploadProgress} className="h-2" />
+                        )}
+                        {uploadError && (
+                          <div className="text-sm text-red-500 flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4" />
+                            {uploadError}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
