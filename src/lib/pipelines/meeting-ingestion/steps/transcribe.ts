@@ -32,53 +32,41 @@ export async function transcribeStep(
     if (state.language === "he") {
       console.log("[pipeline:transcribe] Submitting async job to Ivrit AI...");
 
-      // Fetch audio and trim leading silence to prevent hallucinations
-      const audioResponse = await fetch(state.audioUrl);
-      if (!audioResponse.ok) {
-        throw new Error("Failed to fetch audio file for Hebrew transcription");
-      }
-      const contentType = audioResponse.headers.get("content-type") || "audio/m4a";
-      const audioBlob = new Blob([await audioResponse.arrayBuffer()], { type: contentType });
-
-      // Trim leading silence (prevents Knesset hallucinations from Ivrit AI training data)
-      const { blob: trimmedBlob, trimmedSeconds, wasProcessed } = await trimLeadingSilence(audioBlob);
-      if (wasProcessed && trimmedSeconds > 0) {
-        console.log(`[pipeline:transcribe] Trimmed ${trimmedSeconds.toFixed(2)}s of leading silence`);
-      } else if (!wasProcessed) {
-        console.log("[pipeline:transcribe] Silence trimming skipped (FFmpeg unavailable)");
-      }
-
-      // Check file size - Ivrit API has 10MB body limit
-      const fileSizeMB = trimmedBlob.size / (1024 * 1024);
+      // Check file size first without downloading the whole file
       const MAX_BLOB_SIZE_MB = 10;
+      const headResponse = await fetch(state.audioUrl, { method: "HEAD" });
+      const contentLength = headResponse.headers.get("content-length");
+      const fileSizeMB = contentLength ? parseInt(contentLength, 10) / (1024 * 1024) : 0;
 
-      let audioBlobOrUrl: Blob | string = trimmedBlob;
+      console.log(`[pipeline:transcribe] File size: ${fileSizeMB.toFixed(2)}MB`);
+
+      let audioBlobOrUrl: Blob | string;
 
       if (fileSizeMB > MAX_BLOB_SIZE_MB) {
-        console.log(`[pipeline:transcribe] File size ${fileSizeMB.toFixed(2)}MB exceeds ${MAX_BLOB_SIZE_MB}MB limit, uploading to storage...`);
+        // For large files (>10MB): Use URL directly, skip trimming
+        // This avoids Ivrit API's 10MB body limit and RLS upload issues
+        console.log(`[pipeline:transcribe] File exceeds ${MAX_BLOB_SIZE_MB}MB, using URL directly (skipping silence trim)`);
+        audioBlobOrUrl = state.audioUrl;
+      } else {
+        // For small files (<10MB): Fetch, trim silence, send as blob
+        console.log(`[pipeline:transcribe] File is within ${MAX_BLOB_SIZE_MB}MB limit, fetching for silence trim...`);
 
-        // Upload to Supabase storage and get public URL
-        const fileName = `transcription-temp/${state.sessionId}-${Date.now()}.m4a`;
-        const { error: uploadError } = await supabase.storage
-          .from("audio")
-          .upload(fileName, trimmedBlob, {
-            contentType: contentType,
-            upsert: false,
-          });
+        const audioResponse = await fetch(state.audioUrl);
+        if (!audioResponse.ok) {
+          throw new Error("Failed to fetch audio file for Hebrew transcription");
+        }
+        const contentType = audioResponse.headers.get("content-type") || "audio/m4a";
+        const audioBlob = new Blob([await audioResponse.arrayBuffer()], { type: contentType });
 
-        if (uploadError) {
-          throw new Error(`Failed to upload large audio file: ${uploadError.message}`);
+        // Trim leading silence (prevents Knesset hallucinations from Ivrit AI training data)
+        const { blob: trimmedBlob, trimmedSeconds, wasProcessed } = await trimLeadingSilence(audioBlob);
+        if (wasProcessed && trimmedSeconds > 0) {
+          console.log(`[pipeline:transcribe] Trimmed ${trimmedSeconds.toFixed(2)}s of leading silence`);
+        } else if (!wasProcessed) {
+          console.log("[pipeline:transcribe] Silence trimming skipped (FFmpeg unavailable)");
         }
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from("audio")
-          .getPublicUrl(fileName);
-
-        console.log(`[pipeline:transcribe] Uploaded to storage: ${publicUrl}`);
-        audioBlobOrUrl = publicUrl;
-      } else {
-        console.log(`[pipeline:transcribe] File size ${fileSizeMB.toFixed(2)}MB is within limit, sending as blob`);
+        audioBlobOrUrl = trimmedBlob;
       }
 
       const { jobId } = await transcriptionService.submitAsyncJob(audioBlobOrUrl, {
