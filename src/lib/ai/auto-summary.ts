@@ -88,7 +88,7 @@ export async function generateAndSaveSummary(
       options?.language || "en"
     );
 
-    // Save summary with notes
+    // Save summary with sections and metadata
     const { data: summary, error: summaryError } = await supabase
       .from("summaries")
       .insert({
@@ -96,7 +96,10 @@ export async function generateAndSaveSummary(
         overview: summaryResult.overview,
         key_points: summaryResult.keyPoints,
         decisions: summaryResult.decisions,
-        notes: summaryResult.notes, // New timestamped sections
+        sections: summaryResult.sections,   // New adaptive sections (JSONB)
+        meeting_type: summaryResult.meetingType,  // Detected meeting type
+        next_steps: summaryResult.nextSteps,      // Clear action path
+        notes: summaryResult.notes, // Legacy field for backwards compat
       })
       .select()
       .single();
