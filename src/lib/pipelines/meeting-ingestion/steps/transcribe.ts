@@ -4,10 +4,13 @@
  * Handles audio-to-text conversion using:
  * - Whisper for English
  * - Ivrit AI (via RunPod) for Hebrew (async job)
+ *
+ * Pre-processing: Trims leading silence to prevent Whisper hallucinations
  */
 
 import { SupabaseClient } from "@supabase/supabase-js";
 import { getTranscriptionService } from "@/lib/transcription";
+import { trimLeadingSilence } from "@/lib/audio/silence-trimmer";
 import type { PipelineState, PipelineOptions, StepResult, TranscriptionResult } from "../types";
 
 interface TranscribeStepResult {
@@ -29,7 +32,56 @@ export async function transcribeStep(
     if (state.language === "he") {
       console.log("[pipeline:transcribe] Submitting async job to Ivrit AI...");
 
-      const { jobId } = await transcriptionService.submitAsyncJob(state.audioUrl, {
+      // Fetch audio and trim leading silence to prevent hallucinations
+      const audioResponse = await fetch(state.audioUrl);
+      if (!audioResponse.ok) {
+        throw new Error("Failed to fetch audio file for Hebrew transcription");
+      }
+      const contentType = audioResponse.headers.get("content-type") || "audio/m4a";
+      const audioBlob = new Blob([await audioResponse.arrayBuffer()], { type: contentType });
+
+      // Trim leading silence (prevents Knesset hallucinations from Ivrit AI training data)
+      const { blob: trimmedBlob, trimmedSeconds, wasProcessed } = await trimLeadingSilence(audioBlob);
+      if (wasProcessed && trimmedSeconds > 0) {
+        console.log(`[pipeline:transcribe] Trimmed ${trimmedSeconds.toFixed(2)}s of leading silence`);
+      } else if (!wasProcessed) {
+        console.log("[pipeline:transcribe] Silence trimming skipped (FFmpeg unavailable)");
+      }
+
+      // Check file size - Ivrit API has 10MB body limit
+      const fileSizeMB = trimmedBlob.size / (1024 * 1024);
+      const MAX_BLOB_SIZE_MB = 10;
+
+      let audioBlobOrUrl: Blob | string = trimmedBlob;
+
+      if (fileSizeMB > MAX_BLOB_SIZE_MB) {
+        console.log(`[pipeline:transcribe] File size ${fileSizeMB.toFixed(2)}MB exceeds ${MAX_BLOB_SIZE_MB}MB limit, uploading to storage...`);
+
+        // Upload to Supabase storage and get public URL
+        const fileName = `transcription-temp/${state.sessionId}-${Date.now()}.m4a`;
+        const { error: uploadError } = await supabase.storage
+          .from("audio")
+          .upload(fileName, trimmedBlob, {
+            contentType: contentType,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          throw new Error(`Failed to upload large audio file: ${uploadError.message}`);
+        }
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from("audio")
+          .getPublicUrl(fileName);
+
+        console.log(`[pipeline:transcribe] Uploaded to storage: ${publicUrl}`);
+        audioBlobOrUrl = publicUrl;
+      } else {
+        console.log(`[pipeline:transcribe] File size ${fileSizeMB.toFixed(2)}MB is within limit, sending as blob`);
+      }
+
+      const { jobId } = await transcriptionService.submitAsyncJob(audioBlobOrUrl, {
         numSpeakers: options?.numSpeakers ?? 2,
         prompt: state.context || undefined,
       });
@@ -65,7 +117,15 @@ export async function transcribeStep(
     }
     const audioBlob = await audioResponse.blob();
 
-    const result = await transcriptionService.transcribe(audioBlob, {
+    // Trim leading silence to prevent Whisper hallucinations
+    const { blob: trimmedBlob, trimmedSeconds, wasProcessed } = await trimLeadingSilence(audioBlob);
+    if (wasProcessed && trimmedSeconds > 0) {
+      console.log(`[pipeline:transcribe] Trimmed ${trimmedSeconds.toFixed(2)}s of leading silence`);
+    } else if (!wasProcessed) {
+      console.log("[pipeline:transcribe] Silence trimming skipped (FFmpeg unavailable)");
+    }
+
+    const result = await transcriptionService.transcribe(trimmedBlob, {
       numSpeakers: options?.numSpeakers ?? 2,
       prompt: state.context || undefined,
       language: "en",
